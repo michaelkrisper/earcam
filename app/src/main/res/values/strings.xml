@@ -3,6 +3,7 @@
     <string name="app_name">EarCam</string>
     <string name="ear_right">Rechtes Ohr</string>
     <string name="ear_left">Linkes Ohr</string>
-    <string name="connecting">Verbinde mit Kamera …</string>
-    <string name="no_camera">Keine Kamera gefunden. Ist sie eingeschaltet?</string>
+    <string name="searching_current">Suche Kamera im aktuellen WLAN …</string>
+    <string name="starting_stream">Starte Videostream …</string>
+    <string name="no_camera">Keine Kamera gefunden.\nIst sie eingeschaltet?</string>
 </resources>

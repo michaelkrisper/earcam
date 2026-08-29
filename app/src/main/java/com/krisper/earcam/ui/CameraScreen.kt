@@ -55,9 +55,7 @@ fun CameraScreen(
             Canvas(Modifier.fillMaxSize()) { drawUpright(image, state.angle) }
         } else {
             BasicText(
-                text = stringResource(
-                    if (state.error) R.string.no_camera else R.string.connecting
-                ),
+                text = if (state.error) stringResource(R.string.no_camera) else state.status,
                 style = TextStyle(color = Color.White, fontSize = 16.sp),
             )
         }

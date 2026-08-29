@@ -11,6 +11,8 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withContext
+import android.util.Log
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
@@ -107,5 +109,31 @@ class CameraStream(
 
     companion object {
         const val STATE_CONNECTING = "connecting"
+
+        /**
+         * Asks the camera for its device info over [network] (or the default route when
+         * null) and reports whether it answered. Lets the app use a camera the user
+         * joined manually in system settings, instead of insisting on its own request.
+         */
+        suspend fun probe(network: Network?, timeoutMs: Int = 2000): Boolean =
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    DatagramSocket().use { socket ->
+                        network?.bindSocket(socket)
+                        socket.soTimeout = timeoutMs
+                        val req = Protocol.command(Protocol.TYPE_GET_DEVICE_INFO)
+                        val addr = InetAddress.getByName(Protocol.DEVICE_IP)
+                        socket.send(DatagramPacket(req, req.size, addr, Protocol.COMMAND_PORT))
+
+                        val reply = ByteArray(512)
+                        socket.receive(DatagramPacket(reply, reply.size))
+                        Log.i(WifiConnector.TAG, "camera answered probe on ${network ?: "default"}")
+                        true
+                    }
+                }.getOrElse {
+                    Log.i(WifiConnector.TAG, "probe failed: ${it.javaClass.simpleName}")
+                    false
+                }
+            }
     }
 }

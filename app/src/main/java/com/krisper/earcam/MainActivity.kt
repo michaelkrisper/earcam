@@ -2,6 +2,7 @@ package com.krisper.earcam
 
 import android.net.Network
 import android.os.Bundle
+import android.util.Log
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -45,13 +46,16 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         state = state.copy(error = false)
-        val connector = WifiConnector(this)
-        wifi = connector
-        connector.connect(
-            onAvailable = ::startStream,
-            onState = { },
-            onFailed = { lifecycleScope.launch { state = state.copy(error = true) } },
-        )
+        lifecycleScope.launch {
+            // If the phone is already on the camera's WiFi (joined manually, or left over
+            // from a previous run), use it directly rather than asking for a new network.
+            setStatus(getString(R.string.searching_current))
+            if (CameraStream.probe(null)) {
+                startStream(null)
+                return@launch
+            }
+            requestCameraNetwork()
+        }
     }
 
     override fun onStop() {
@@ -62,8 +66,26 @@ class MainActivity : ComponentActivity() {
         wifi = null
     }
 
-    private fun startStream(network: Network) {
+    private fun requestCameraNetwork() {
+        val connector = WifiConnector(this)
+        wifi = connector
+        connector.connect(
+            onAvailable = { network -> lifecycleScope.launch { startStream(network) } },
+            onState = { text -> lifecycleScope.launch { setStatus(text) } },
+            onFailed = {
+                lifecycleScope.launch { state = state.copy(error = true, status = "") }
+            },
+        )
+    }
+
+    private fun setStatus(text: String) {
+        state = state.copy(status = text)
+    }
+
+    private fun startStream(network: Network?) {
         streamJob?.cancel()
+        Log.i(WifiConnector.TAG, "starting stream on ${network ?: "default network"}")
+        setStatus(getString(R.string.starting_stream))
         streamJob = lifecycleScope.launch {
             CameraStream(network).frames(onState = { }).collect { frame ->
                 val earOffset = if (state.ear == Ear.LEFT) 180f else 0f
@@ -73,6 +95,7 @@ class MainActivity : ComponentActivity() {
                     image = frame.bitmap.asImageBitmap(),
                     angle = smoothed,
                     error = false,
+                    status = "",
                     debugText = if (state.debug) {
                         "x=${frame.posX} y=${frame.posY} z=${frame.posZ} " +
                             "${frame.width}x${frame.height} ${smoothed.toInt()}°"

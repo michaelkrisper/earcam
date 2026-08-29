@@ -7,6 +7,7 @@ import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.net.wifi.WifiNetworkSpecifier
 import android.os.PatternMatcher
+import android.util.Log
 
 /**
  * Joins the camera's access point without taking the whole phone offline.
@@ -43,11 +44,14 @@ class WifiConnector(context: Context) {
 
     private fun tryNext(onAvailable: (Network) -> Unit, onState: (String) -> Unit, onFailed: () -> Unit) {
         if (index >= attempts.size) {
+            Log.w(TAG, "no camera AP matched any known prefix")
             onFailed()
             return
         }
         val (prefix, passphrase) = attempts[index++]
-        onState("Suche $prefix ...")
+        val label = if (passphrase != null) "$prefix (WPA2)" else "$prefix (offen)"
+        Log.i(TAG, "requesting network: $label")
+        onState("Suche $label …")
 
         val specifier = WifiNetworkSpecifier.Builder()
             .setSsidPattern(PatternMatcher(prefix, PatternMatcher.PATTERN_PREFIX))
@@ -61,14 +65,21 @@ class WifiConnector(context: Context) {
             .build()
 
         val cb = object : ConnectivityManager.NetworkCallback() {
-            override fun onAvailable(network: Network) = onAvailable(network)
+            override fun onAvailable(network: Network) {
+                Log.i(TAG, "connected via $label")
+                onAvailable(network)
+            }
+
             override fun onUnavailable() {
+                Log.i(TAG, "no match for $label")
                 unregister()
                 tryNext(onAvailable, onState, onFailed)
             }
         }
         callback = cb
-        cm.requestNetwork(request, cb)
+        // Without an explicit timeout onUnavailable() is never delivered, so a
+        // non-matching attempt would hang forever instead of falling through.
+        cm.requestNetwork(request, cb, ATTEMPT_TIMEOUT_MS)
     }
 
     private fun unregister() {
@@ -79,7 +90,11 @@ class WifiConnector(context: Context) {
     fun disconnect() = unregister()
 
     companion object {
+        const val TAG = "EarCam"
+
         /** Factory passphrase shipped by this OEM family. */
         const val CAMERA_PASSPHRASE = "12345678"
+
+        private const val ATTEMPT_TIMEOUT_MS = 12_000
     }
 }
