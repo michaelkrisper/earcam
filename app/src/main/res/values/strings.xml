@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">EarCam</string>
+    <string name="ear_right">Rechtes Ohr</string>
+    <string name="ear_left">Linkes Ohr</string>
+    <string name="connecting">Verbinde mit Kamera …</string>
+    <string name="no_camera">Keine Kamera gefunden. Ist sie eingeschaltet?</string>
+</resources>
