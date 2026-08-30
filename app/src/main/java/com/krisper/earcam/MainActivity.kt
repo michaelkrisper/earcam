@@ -17,7 +17,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 /**
- * The whole app: the live camera image rotated upright on black, plus a left/right toggle.
+ * The whole app: the live camera image rotated upright on black.
  *
  * There is exactly one screen and no navigation, so the state lives here rather than in a
  * ViewModel — the activity is configuration-locked and outlives every frame it renders.
@@ -27,7 +27,7 @@ class MainActivity : ComponentActivity() {
     private var state by mutableStateOf(CameraUiState())
     private var wifi: WifiConnector? = null
     private var streamJob: Job? = null
-    private var smoothed = 0f
+    private var smoothed = Orientation.UPRIGHT_OFFSET
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -37,7 +37,6 @@ class MainActivity : ComponentActivity() {
         setContent {
             CameraScreen(
                 state = state,
-                onSelectEar = { ear -> state = state.copy(ear = ear) },
                 onToggleDebug = { state = state.copy(debug = !state.debug) },
             )
         }
@@ -69,9 +68,9 @@ class MainActivity : ComponentActivity() {
     private fun requestCameraNetwork() {
         val connector = WifiConnector(this)
         wifi = connector
+        setStatus(getString(R.string.pick_camera))
         connector.connect(
             onAvailable = { network -> lifecycleScope.launch { startStream(network) } },
-            onState = { text -> lifecycleScope.launch { setStatus(text) } },
             onFailed = {
                 lifecycleScope.launch { state = state.copy(error = true, status = "") }
             },
@@ -88,9 +87,8 @@ class MainActivity : ComponentActivity() {
         setStatus(getString(R.string.starting_stream))
         streamJob = lifecycleScope.launch {
             CameraStream(network).frames(onState = { }).collect { frame ->
-                val earOffset = if (state.ear == Ear.LEFT) 180f else 0f
-                val target = Orientation.angleDegrees(frame.posX, frame.posY) + earOffset
-                smoothed = Orientation.smooth(smoothed, target)
+                val roll = Orientation.angleDegrees(frame.posY, frame.posZ)
+                smoothed = Orientation.smooth(smoothed, Orientation.UPRIGHT_OFFSET - roll)
                 state = state.copy(
                     image = frame.bitmap.asImageBitmap(),
                     angle = smoothed,

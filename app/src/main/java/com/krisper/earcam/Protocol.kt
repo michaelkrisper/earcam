@@ -13,8 +13,13 @@ object Protocol {
     const val DEVICE_IP = "192.168.1.1"
     const val COMMAND_PORT = 10005
     const val STREAM_PORT = 10006
+    /** The camera announces itself here once a second, with a type 0x09 message. */
+    const val NOTIFY_PORT = 10007
 
-    /** Payload bytes carried by a single stream chunk (all but the last one are full). */
+    /**
+     * Upper bound on the payload of a single stream chunk. This firmware sends 1280 and
+     * one chunk per datagram; the cap only matters if a datagram ever packs several.
+     */
     const val CHUNK_PAYLOAD = 1456
     const val CHUNK_HEADER_SIZE = 16
     const val COMMAND_HEADER_SIZE = 12
@@ -28,10 +33,20 @@ object Protocol {
     const val TYPE_CAMERA_COMMAND: Short = 0x000c
 
     /**
-     * Builds a 12-byte command header. Sending [TYPE_OPEN_VIDEO] to [STREAM_PORT]
-     * makes the camera start pushing frames back to the sending socket.
+     * Registers the UDP port the client wants frames on; this is what actually starts
+     * the stream on this firmware. libWifiCamera.so sends it to [STREAM_PORT], next to
+     * 0x14 (same shape, audio port) and 0x15 (stream on/off, which this unit rejects
+     * with error 2). None of them appear in the older Suear-era documentation.
      */
-    fun command(type: Short, id: Int = 0, payload: ByteArray = ByteArray(0)): ByteArray {
+    const val TYPE_SET_PIC_PORT: Short = 0x0016
+
+    /** Builds a 12-byte command header followed by [payload]. */
+    fun command(
+        type: Short,
+        id: Int = 0,
+        payload: ByteArray = ByteArray(0),
+        declaredLength: Int = payload.size,
+    ): ByteArray {
         val buf = ByteBuffer.allocate(COMMAND_HEADER_SIZE + payload.size)
             .order(ByteOrder.LITTLE_ENDIAN)
         buf.putInt(MAGIC)
@@ -39,12 +54,21 @@ object Protocol {
         buf.putShort(type)
         buf.put(1)                      // always 1 in requests
         buf.put(0)                      // error code, 0 in requests
-        buf.putShort(payload.size.toShort())
+        buf.putShort(declaredLength.toShort())
         buf.put(payload)
         return buf.array()
     }
 
-    fun openVideo(id: Int = 0): ByteArray = command(TYPE_OPEN_VIDEO, id)
+    /**
+     * Tells the camera which UDP port on the client should receive video. The stock
+     * client declares a payload length of 0 while still appending the two port bytes,
+     * so this reproduces that quirk byte for byte.
+     */
+    fun setPicPort(port: Int, id: Int = 0): ByteArray = command(
+        TYPE_SET_PIC_PORT, id,
+        byteArrayOf((port and 0xff).toByte(), ((port shr 8) and 0xff).toByte()),
+        declaredLength = 0,
+    )
 
     /**
      * One fragment of a JPEG frame. A single UDP datagram may carry several of these
@@ -55,7 +79,10 @@ object Protocol {
         val frameIndex: Int,
         val isLastChunk: Boolean,
         val totalChunks: Int,
-        /** Raw orientation sensor readings; drives image rotation. Signed 16-bit. */
+        /**
+         * Gravity vector from the probe's accelerometer, ~60 units at 1 g. [posX] lies
+         * along the probe, so the roll around it is `atan2(posZ, posY)`.
+         */
         val posX: Int,
         val posY: Int,
         val posZ: Int,
@@ -64,6 +91,11 @@ object Protocol {
         val payloadOffset: Int,
         val payloadSize: Int,
     )
+
+    private fun signMag(v: Int): Int {
+        val mag = v and 0x1ff
+        return if (v and 0x200 != 0) -mag else mag
+    }
 
     /**
      * Parses the chunk starting at [offset] in [data], or null if fewer than
@@ -78,9 +110,14 @@ object Protocol {
         val lastChunk = (buf.get().toInt() and 0xff) == 1
         val totalChunks = buf.get().toInt() and 0xff  // zero until the last chunk
         buf.get()                                   // unk
-        val posX = buf.short.toInt()
-        val posY = buf.short.toInt()
-        val posZ = buf.short.toInt()
+        // Three 10-bit fields (9-bit magnitude, sign in bit 9) packed little-endian, the
+        // layout sensor_get_xyz in libWifiCamera.so produces. Reading them as int16 gives
+        // garbage, which is what the earlier documentation did.
+        val packed = buf.int
+        val posZ = signMag(packed)
+        val posY = signMag(packed shr 10)
+        val posX = signMag(packed shr 20)
+        buf.short                                   // unk, 0x7458 on this unit
         val width = buf.short.toInt() and 0xffff
         val height = buf.short.toInt() and 0xffff
 

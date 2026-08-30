@@ -14,8 +14,9 @@ import android.util.Log
  *
  * The camera is a hard-wired AP (its firmware has no station mode), so the phone has to
  * associate with it. Requesting the network through [ConnectivityManager] instead of the
- * system WiFi settings keeps the result app-scoped: mobile data stays the default route
- * for everything else, and the [Network] handle is bound per socket in [CameraStream].
+ * system WiFi settings keeps the result app-scoped: mobile data and the home WiFi stay
+ * the default route for everything else, and the [Network] handle is bound per socket
+ * in [CameraStream].
  */
 class WifiConnector(context: Context) {
 
@@ -23,39 +24,18 @@ class WifiConnector(context: Context) {
     private var callback: ConnectivityManager.NetworkCallback? = null
 
     /**
-     * Attempts in order. The observed device advertises "LMECHN-59F77"; the remaining
-     * prefixes are the other brands of this OEM family, taken from the stock app's
-     * Constant.java. Each prefix is tried WPA2 first, then open, because the factory
-     * passphrase is not consistent across models.
+     * Requests the camera network. Android shows a system picker that the user has to
+     * confirm, so this issues exactly one request and waits for that interaction —
+     * cycling through candidate SSIDs would cancel the picker out from under the user.
      */
-    private val attempts: List<Pair<String, String?>> = buildList {
-        for (prefix in listOf("LMECHN", "SUEAR", "i4season", "inskam", "Yanxuan", "SUNUO")) {
-            add(prefix to CAMERA_PASSPHRASE)
-            add(prefix to null)
-        }
-    }
+    fun connect(onAvailable: (Network) -> Unit, onFailed: () -> Unit) {
+        disconnect()
+        Log.i(TAG, "requesting network with prefix $SSID_PREFIX")
 
-    private var index = 0
-
-    fun connect(onAvailable: (Network) -> Unit, onState: (String) -> Unit, onFailed: () -> Unit) {
-        index = 0
-        tryNext(onAvailable, onState, onFailed)
-    }
-
-    private fun tryNext(onAvailable: (Network) -> Unit, onState: (String) -> Unit, onFailed: () -> Unit) {
-        if (index >= attempts.size) {
-            Log.w(TAG, "no camera AP matched any known prefix")
-            onFailed()
-            return
-        }
-        val (prefix, passphrase) = attempts[index++]
-        val label = if (passphrase != null) "$prefix (WPA2)" else "$prefix (offen)"
-        Log.i(TAG, "requesting network: $label")
-        onState("Suche $label …")
-
+        // The camera's AP is open — verified by scan: "LMECHN-59F77 [ESS]" with no
+        // RSN/WPA flags. Setting a passphrase here would exclude the only match.
         val specifier = WifiNetworkSpecifier.Builder()
-            .setSsidPattern(PatternMatcher(prefix, PatternMatcher.PATTERN_PREFIX))
-            .apply { if (passphrase != null) setWpa2Passphrase(passphrase) }
+            .setSsidPattern(PatternMatcher(SSID_PREFIX, PatternMatcher.PATTERN_PREFIX))
             .build()
 
         val request = NetworkRequest.Builder()
@@ -66,35 +46,35 @@ class WifiConnector(context: Context) {
 
         val cb = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
-                Log.i(TAG, "connected via $label")
+                Log.i(TAG, "connected to camera network")
                 onAvailable(network)
             }
 
             override fun onUnavailable() {
-                Log.i(TAG, "no match for $label")
-                unregister()
-                tryNext(onAvailable, onState, onFailed)
+                Log.w(TAG, "camera network unavailable (declined or not found)")
+                onFailed()
+            }
+
+            override fun onLost(network: Network) {
+                Log.w(TAG, "camera network lost")
             }
         }
         callback = cb
-        // Without an explicit timeout onUnavailable() is never delivered, so a
-        // non-matching attempt would hang forever instead of falling through.
-        cm.requestNetwork(request, cb, ATTEMPT_TIMEOUT_MS)
+        // Generous: the timeout must outlast the user reading and confirming the picker.
+        cm.requestNetwork(request, cb, PICKER_TIMEOUT_MS)
     }
 
-    private fun unregister() {
+    fun disconnect() {
         callback?.let { runCatching { cm.unregisterNetworkCallback(it) } }
         callback = null
     }
 
-    fun disconnect() = unregister()
-
     companion object {
         const val TAG = "EarCam"
 
-        /** Factory passphrase shipped by this OEM family. */
-        const val CAMERA_PASSPHRASE = "12345678"
+        /** Covers "LMECHN-59F77" and any sibling unit of the same brand. */
+        private const val SSID_PREFIX = "LMECHN"
 
-        private const val ATTEMPT_TIMEOUT_MS = 12_000
+        private const val PICKER_TIMEOUT_MS = 120_000
     }
 }

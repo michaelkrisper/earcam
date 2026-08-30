@@ -1,9 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">EarCam</string>
-    <string name="ear_right">Rechtes Ohr</string>
-    <string name="ear_left">Linkes Ohr</string>
     <string name="searching_current">Suche Kamera im aktuellen WLAN …</string>
     <string name="starting_stream">Starte Videostream …</string>
+    <string name="pick_camera">Kamera im Dialog auswählen\nund auf „Verbinden“ tippen</string>
     <string name="no_camera">Keine Kamera gefunden.\nIst sie eingeschaltet?</string>
 </resources>

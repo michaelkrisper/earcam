@@ -17,9 +17,10 @@ that sets an SSID or passphrase. Its address is fixed.
 |---|---|
 | Camera IP | `192.168.1.1` |
 | SSID | `LMECHN-<hex>` (other brands use `SUEAR-`, `inskam-`, …) |
-| Passphrase | `12345678` (factory default, per the stock app's `Constant.java`) |
+| Security | **Open.** Verified by scan: `LMECHN-59F77 … [ESS]`, no RSN/WPA flags. The stock app's `Constant.java` carries a `12345678` passphrase, but this unit does not use it. |
 | Command port | UDP 10005 |
 | Stream port | UDP 10006 |
+| Notify port | UDP 10007 (on the *client*) |
 
 ## Command messages
 
@@ -38,20 +39,55 @@ Known types: `0x01` GetDeviceInfo, `0x02` GetLicense, `0x03` SetLicense, `0x04` 
 `0x06` UpdateFirmware, `0x0a` SetLed, `0x0c` CameraCommand, `0x0d` GetCameraConfig,
 `0x0e` SetCameraConfig.
 
+The `libWifiCamera.so` shipped with the current app adds `0x10`–`0x13` (sent to 10005)
+and `0x14`–`0x16` (sent to 10006) on top of that table.
+
 ## Starting the stream
 
-Send OpenVideo to **port 10006** from an unconnected UDP socket:
+The OpenVideo of the older Suear-era clients does **not** work on this firmware. It is
+acknowledged with `err=0` and then nothing happens — no frames, on any port. The 22785
+those clients bind is not a protocol constant either: it never appears in
+`libWifiCamera.so`, it was just the port that one client happened to get.
+
+What the stock client actually does (`openVideoForceApi`, and the socket setup a few
+hundred bytes earlier in the same object):
+
+1. Bind a UDP socket, letting the OS pick the port.
+2. Read that port back with `getsockname()`.
+3. Send **type `0x16`** to **port 10006** with the port as a little-endian `uint16`:
+
+   ```
+   ee ff ee ff <id:2> 16 00 01 00 00 00 <port:2>
+   ```
+
+   Note the length field says `0` although two payload bytes follow — the stock client
+   sends 14 bytes with a zero length, and the camera does not mind.
+
+Frames start arriving on the registered socket immediately, from source port 10006.
+Re-send the message if they stall.
+
+`0x14` has the same shape and registers the audio port; `0x15` carries a single `1`/`0`
+byte and looks like a stream on/off switch, but this unit answers it with error 2 and
+streams fine without it.
+
+## Device announcements
+
+Once associated, the camera sends a 29-byte type `0x09` message to **client** port 10007
+every second, from an ephemeral port of its own:
 
 ```
-ee ff ee ff 00 00 04 00 01 00 00 00
+ee ff ee ff 00 00 09 00 00 00 11 00 02 0c 01 00 00 00 00 58 …
 ```
 
-The camera then pushes frames back to that same socket. Re-send it if frames stall.
+EarCam ignores these; they are listed here because they are the only unsolicited traffic
+that arrives before the stream is registered, which makes them a useful sign of life.
 
 ## Stream chunks
 
-JPEG frames are split across UDP datagrams. A single datagram may carry several chunks
-back to back, each a 16-byte header followed by up to 1456 payload bytes.
+JPEG frames are split across UDP datagrams, each a 16-byte header followed by the
+payload. This firmware sends one chunk per datagram with a 1280-byte payload (1296-byte
+datagrams) at 640x480. The reference client allows several chunks packed back to back in
+one datagram, with payloads up to 1456 bytes, so EarCam parses that case too.
 
 | Offset | Size | Field |
 |---|---|---|
@@ -59,14 +95,15 @@ back to back, each a 16-byte header followed by up to 1456 payload bytes.
 | 1 | 1 | chunk index (8-bit, wraps) |
 | 2 | 1 | frame index (8-bit, wraps) |
 | 3 | 1 | `1` on the frame's last chunk |
-| 4 | 1 | total chunks — **zero until the last chunk** |
+| 4 | 1 | total chunks — zero until the last chunk on older firmware, already set on the first chunk here |
 | 5 | 1 | unknown |
-| 6 | 6 | orientation: three signed 16-bit axes |
+| 6 | 4 | gravity vector, packed (see below) |
+| 10 | 2 | unknown, `0x7458` on this unit |
 | 12 | 2 | frame width |
 | 14 | 2 | frame height |
 
-Reassembly: every chunk but the last carries a full 1456-byte payload, so the first
-chunk seen establishes the stride. Offsets are relative to that first chunk index, with
+Reassembly: every chunk but the last carries a full payload, so the first chunk seen
+establishes the stride. Offsets are relative to that first chunk index, with
 `+256` added when the 8-bit counter has wrapped. A frame is complete once the total is
 known and the accumulated size exceeds `stride * (total - 1)`.
 
@@ -79,7 +116,20 @@ payload layout is unverified.
 
 ### Orientation
 
-The three axes drive the image rotation that keeps the view upright while the probe is
-turned. The mapping from axes to roll angle is **not verified against hardware** — see
-`Orientation.angleDegrees`, which currently assumes `atan2(y, x)`. Long-press the image
-in the app to overlay the raw values for calibration.
+Offset 6 holds a little-endian `uint32` with three 10-bit fields, each a 9-bit magnitude
+with the sign in bit 9 — the layout `sensor_get_xyz` in `libWifiCamera.so` produces:
+
+| Bits | Axis |
+|---|---|
+| 0–9 | z |
+| 10–19 | y |
+| 20–29 | x |
+
+Reading the same bytes as three `int16` (as older write-ups do) yields garbage. The
+vector is gravity, about 60 units at 1 g. Calibrated on hardware: `x` runs along the
+probe and stays constant while it is rolled; `y` and `z` sweep a circle. Roll is
+`atan2(z, y)`, zero in the rest position and increasing when the probe is turned
+counter-clockwise as seen from behind. The sensor image comes out a quarter turn off
+(bottom on the left), so EarCam draws it at `-90° - roll`.
+
+The camera does not stabilise the image itself; the stock app rotates on the phone too.
