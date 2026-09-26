@@ -1,107 +1,81 @@
 package com.krisper.earcam
 
+import android.app.Activity
 import android.net.Network
 import android.os.Bundle
 import android.util.Log
-import android.view.WindowManager
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.lifecycle.lifecycleScope
-import com.krisper.earcam.ui.CameraScreen
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.launch
+import android.widget.Toast
+import kotlin.concurrent.thread
 
 /**
- * The whole app: the live camera image rotated upright on black.
- *
- * There is exactly one screen and no navigation, so the state lives here rather than in a
- * ViewModel — the activity is configuration-locked and outlives every frame it renders.
+ * The whole app: one [CameraView], no layout. Progress goes to logcat only; the one
+ * thing the user has to act on, the system network picker, brings its own UI.
  */
-class MainActivity : ComponentActivity() {
+class MainActivity : Activity() {
 
-    private var state by mutableStateOf(CameraUiState())
+    private lateinit var view: CameraView
     private var wifi: WifiConnector? = null
-    private var streamJob: Job? = null
-    private var smoothed = Orientation.UPRIGHT_OFFSET
+    private var stream: CameraStream? = null
+
+    /** Bumped on every start and stop, so late callbacks from a previous run are ignored. */
+    private var session = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        view = CameraView(this)
+        setContentView(view)
+    }
 
-        setContent {
-            CameraScreen(
-                state = state,
-                onToggleDebug = { state = state.copy(debug = !state.debug) },
-            )
-        }
+    override fun onResume() {
+        super.onResume()
+        view.onResume()
+    }
+
+    override fun onPause() {
+        view.onPause()
+        super.onPause()
     }
 
     override fun onStart() {
         super.onStart()
-        state = state.copy(error = false)
-        lifecycleScope.launch {
-            // If the phone is already on the camera's WiFi (joined manually, or left over
-            // from a previous run), use it directly rather than asking for a new network.
-            setStatus(getString(R.string.searching_current))
-            if (CameraStream.probe(null)) {
-                startStream(null)
-                return@launch
+        val s = ++session
+        // If the phone is already on the camera's WiFi (joined manually, or left over
+        // from a previous run), use it directly rather than asking for a new network.
+        thread(name = "earcam-probe") {
+            val reachable = CameraStream.probe(null)
+            runOnUiThread {
+                if (s != session) return@runOnUiThread
+                if (reachable) startStream(null) else requestCameraNetwork()
             }
-            requestCameraNetwork()
         }
     }
 
     override fun onStop() {
         super.onStop()
-        streamJob?.cancel()
-        streamJob = null
+        session++
+        stream?.stop()
+        stream = null
         wifi?.disconnect()
         wifi = null
     }
 
     private fun requestCameraNetwork() {
-        val connector = WifiConnector(this)
-        wifi = connector
-        setStatus(getString(R.string.pick_camera))
-        connector.connect(
-            onAvailable = { network -> lifecycleScope.launch { startStream(network) } },
-            onFailed = {
-                lifecycleScope.launch { state = state.copy(error = true, status = "") }
-            },
-        )
-    }
-
-    private fun setStatus(text: String) {
-        state = state.copy(status = text)
+        val s = session
+        wifi = WifiConnector(this).apply {
+            connect(
+                onAvailable = { network -> runOnUiThread { if (s == session) startStream(network) } },
+                onFailed = {
+                    runOnUiThread {
+                        if (s == session) Toast.makeText(this@MainActivity, R.string.no_camera, Toast.LENGTH_LONG).show()
+                    }
+                },
+            )
+        }
     }
 
     private fun startStream(network: Network?) {
-        streamJob?.cancel()
+        stream?.stop()
         Log.i(WifiConnector.TAG, "starting stream on ${network ?: "default network"}")
-        setStatus(getString(R.string.starting_stream))
-        streamJob = lifecycleScope.launch {
-            CameraStream(network).frames(onState = { }).collect { frame ->
-                val roll = Orientation.angleDegrees(frame.posY, frame.posZ)
-                smoothed = Orientation.smooth(smoothed, Orientation.UPRIGHT_OFFSET - roll)
-                state = state.copy(
-                    image = frame.bitmap.asImageBitmap(),
-                    angle = smoothed,
-                    error = false,
-                    status = "",
-                    debugText = if (state.debug) {
-                        "x=${frame.posX} y=${frame.posY} z=${frame.posZ} " +
-                            "${frame.width}x${frame.height} ${smoothed.toInt()}°"
-                    } else {
-                        ""
-                    },
-                )
-            }
-        }
+        stream = CameraStream(network, view.exchange).apply { start() }
     }
 }

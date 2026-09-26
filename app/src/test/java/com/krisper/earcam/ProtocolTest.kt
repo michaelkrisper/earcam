@@ -17,7 +17,7 @@ class ProtocolTest {
             0xee.toByte(), 0xff.toByte(), 0xee.toByte(), 0xff.toByte(),
             0x00, 0x00, 0x04, 0x00, 0x01, 0x00, 0x00, 0x00,
         )
-        assertTrue(expected.contentEquals(Protocol.openVideo()))
+        assertTrue(expected.contentEquals(Protocol.command(Protocol.TYPE_OPEN_VIDEO)))
     }
 
     @Test
@@ -81,6 +81,48 @@ class ProtocolTest {
     }
 
     @Test
+    fun assemblerRecyclesFrameBuffers() {
+        val assembler = FrameAssembler()
+        fun single(frameIndex: Int): FrameAssembler.Frame {
+            val c = chunk(chunkIndex = 0, frameIndex = frameIndex, last = 1, total = 1, payload = 10)
+            return assembler.add(Protocol.parseChunk(c, 0, c.size)!!, c)!!
+        }
+        val first = single(1).buf
+        assertTrue(first === single(2).buf)
+    }
+
+    @Test
+    fun assemblerOrdersChunksByIndexNotArrival() {
+        val assembler = FrameAssembler()
+        val b = chunk(chunkIndex = 113, frameIndex = 5, last = 0, total = 0, fill = 2)
+        val c = chunk(chunkIndex = 114, frameIndex = 5, last = 1, total = 3, payload = 10, fill = 3)
+        val a = chunk(chunkIndex = 112, frameIndex = 5, last = 0, total = 0, fill = 1)
+        assertNull(assembler.add(Protocol.parseChunk(b, 0, b.size)!!, b))
+        assertNull(assembler.add(Protocol.parseChunk(c, 0, c.size)!!, c))
+        assertNull(assembler.add(Protocol.parseChunk(b, 0, b.size)!!, b)) // duplicate
+        val frame = assembler.add(Protocol.parseChunk(a, 0, a.size)!!, a)!!
+        assertEquals(Protocol.CHUNK_PAYLOAD * 2 + 10, frame.acquired)
+        assertEquals(1, frame.buf[0].toInt())
+        assertEquals(2, frame.buf[Protocol.CHUNK_PAYLOAD].toInt())
+        assertEquals(3, frame.buf[Protocol.CHUNK_PAYLOAD * 2].toInt())
+    }
+
+    @Test
+    fun assemblerDropsFramesThatFellBehind() {
+        val assembler = FrameAssembler()
+        fun feed(chunkIndex: Int, frameIndex: Int, last: Int = 0, total: Int = 0) =
+            chunk(chunkIndex, frameIndex, last, total, payload = 10).let {
+                assembler.add(Protocol.parseChunk(it, 0, it.size)!!, it)
+            }
+        // Frame 0 loses a chunk; its final chunk stays parked.
+        feed(chunkIndex = 1, frameIndex = 0, last = 1, total = 2)
+        // Frames 1..4 go by, so frame 0 is dropped.
+        for (f in 1..4) assertNotNull(feed(chunkIndex = 10 + f, frameIndex = f, last = 1, total = 1))
+        // A new frame reusing index 0 must not complete with the stale chunk.
+        assertNull(feed(chunkIndex = 0, frameIndex = 0))
+    }
+
+    @Test
     fun smoothTakesShortestPath() {
         // 350 -> 10 must move forwards by 20, not backwards by 340.
         val next = Orientation.smooth(350f, 10f, factor = 0.5f)
@@ -102,6 +144,7 @@ class ProtocolTest {
         y: Int = 0,
         z: Int = 0,
         payload: Int = Protocol.CHUNK_PAYLOAD,
+        fill: Int = 0,
     ): ByteArray {
         val buf = ByteBuffer.allocate(Protocol.CHUNK_HEADER_SIZE + payload)
             .order(ByteOrder.LITTLE_ENDIAN)
@@ -111,11 +154,13 @@ class ProtocolTest {
         buf.put(last.toByte())
         buf.put(total.toByte())
         buf.put(0)
-        buf.putShort(x.toShort())
-        buf.putShort(y.toShort())
-        buf.putShort(z.toShort())
+        buf.putInt((signMag(x) shl 20) or (signMag(y) shl 10) or signMag(z))
+        buf.putShort(0x7458)
         buf.putShort(640)
         buf.putShort(480)
+        while (buf.hasRemaining()) buf.put(fill.toByte())
         return buf.array()
     }
+
+    private fun signMag(v: Int): Int = if (v < 0) 0x200 or -v else v
 }

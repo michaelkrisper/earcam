@@ -2,6 +2,7 @@ package com.krisper.earcam
 
 import kotlin.math.abs
 import kotlin.math.atan2
+import kotlin.math.pow
 
 /**
  * Turns the per-frame gravity vector into a screen rotation.
@@ -40,4 +41,10 @@ object Orientation {
         if (abs(delta) < deadband) return current
         return current + delta * factor
     }
+
+    /**
+     * The [smooth] factor for a step of [dtMs], so the easing speed does not depend on
+     * how often it runs. Tuned as 0.12 per camera frame at 17 fps (~59 ms).
+     */
+    fun factorFor(dtMs: Float): Float = 1f - 0.88f.pow(dtMs / 59f)
 }

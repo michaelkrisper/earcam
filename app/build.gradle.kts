@@ -1,27 +1,17 @@
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
-    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 android {
     namespace = "com.krisper.earcam"
-    compileSdk = 35
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.krisper.earcam"
         minSdk = 34
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 1
         versionName = "0.1"
-        // Single-screen app with no localisation beyond German: keep only what is used.
-        resourceConfigurations += listOf("de", "en")
-
-        // The app has no native code of its own; the only .so comes from compose-ui.
-        // Every Android 14 device is arm64, so the other three ABIs are dead weight.
-        ndk {
-            abiFilters += "arm64-v8a"
-        }
     }
 
     packaging {
@@ -35,10 +25,6 @@ android {
         }
     }
 
-    buildFeatures {
-        compose = true
-    }
-
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -50,23 +36,13 @@ android {
     }
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
-    }
-    kotlinOptions {
-        jvmTarget = "17"
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
     }
 }
 
 dependencies {
-    // Deliberately minimal: Compose UI and foundation only. Material 3 and the icon
-    // packs would dominate the APK for a screen that is one image and one toggle.
-    val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
-    implementation(composeBom)
-    implementation("androidx.activity:activity-compose:1.9.3")
-    implementation("androidx.compose.foundation:foundation")
-    implementation("androidx.compose.ui:ui")
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
-
+    // None at runtime: the platform's GLSurfaceView, BitmapFactory and sockets are all
+    // this app needs, and every library would only add startup time and APK weight.
     testImplementation("junit:junit:4.13.2")
 }
