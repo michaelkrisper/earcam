@@ -40,8 +40,9 @@ impl Renderer {
             // The vertex shader needs no attributes, but a bound VAO keeps every driver happy.
             let vao = gl.create_vertex_array()?;
             gl.bind_vertex_array(Some(vao));
-            let deblock = program(&gl, VERTEX_SHADER, DEBLOCK_SHADER)?;
-            let display = program(&gl, VERTEX_SHADER, DISPLAY_SHADER)?;
+            let version = shader_version(gl.version().is_embedded);
+            let deblock = program(&gl, version, VERTEX_SHADER, DEBLOCK_SHADER)?;
+            let display = program(&gl, version, VERTEX_SHADER, DISPLAY_SHADER)?;
             let camera_tex = texture(&gl)?;
             let deblocked_tex = texture(&gl)?;
             let fbo = gl.create_framebuffer()?;
@@ -176,8 +177,20 @@ unsafe fn texture(gl: &glow::Context) -> Result<NativeTexture, String> {
     }
 }
 
+/// The shaders are GLSL ES 3.00 as on Android. The same source compiles as GLSL 3.30 on a
+/// desktop GL context (Windows without GLES support), where precision qualifiers are
+/// accepted and ignored.
+pub fn shader_version(embedded: bool) -> &'static str {
+    if embedded {
+        "#version 300 es\n"
+    } else {
+        "#version 330 core\n"
+    }
+}
+
 unsafe fn program(
     gl: &glow::Context,
+    version: &str,
     vertex: &str,
     fragment: &str,
 ) -> Result<NativeProgram, String> {
@@ -188,10 +201,10 @@ unsafe fn program(
             (glow::FRAGMENT_SHADER, fragment),
         ] {
             let shader = gl.create_shader(ty)?;
-            gl.shader_source(shader, src);
+            gl.shader_source(shader, &format!("{version}{src}"));
             gl.compile_shader(shader);
             if !gl.get_shader_compile_status(shader) {
-                return Err(gl.get_shader_info_log(shader));
+                return Err(format!("shader: {}", gl.get_shader_info_log(shader)));
             }
             gl.attach_shader(program, shader);
         }
@@ -204,8 +217,7 @@ unsafe fn program(
 }
 
 /// One triangle covering the viewport, generated from the vertex ID: no buffers.
-const VERTEX_SHADER: &str = r"#version 300 es
-void main() {
+const VERTEX_SHADER: &str = r"void main() {
     vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
     gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
 }
@@ -215,8 +227,7 @@ void main() {
 /// BETA: largest step within either side for that side to count as flat.
 /// Luma works on the 8x8 grid, chroma (_C, in YCbCr) on the 16x16 one.
 /// Tuned on hardware in the Android app; keep the two in sync.
-const DEBLOCK_SHADER: &str = r"#version 300 es
-precision highp float;
+const DEBLOCK_SHADER: &str = r"precision highp float;
 uniform sampler2D uFrame;
 out vec4 color;
 const float ALPHA = 0.10;
@@ -287,8 +298,7 @@ void main() {
 }
 ";
 
-const DISPLAY_SHADER: &str = r"#version 300 es
-precision highp float;
+const DISPLAY_SHADER: &str = r"precision highp float;
 uniform sampler2D uTex;
 uniform vec2 uCenter;
 uniform float uRadius;
@@ -304,3 +314,17 @@ void main() {
     color = vec4(texture(uTex, uv).rgb * inside, 1.0);
 }
 ";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shaders_leave_the_version_to_the_context() {
+        for src in [VERTEX_SHADER, DEBLOCK_SHADER, DISPLAY_SHADER] {
+            assert!(!src.contains("#version"));
+        }
+        assert!(shader_version(true).starts_with("#version 300 es"));
+        assert!(shader_version(false).starts_with("#version 330 core"));
+    }
+}

@@ -1,22 +1,18 @@
 //! EarCam for the desktop: joins the camera's WiFi on start, shows the live image rotated
-//! upright inside a circle on black, fullscreen, and goes back to the home network on
-//! quit (q, Escape, closing the window, or SIGINT/SIGTERM/SIGHUP).
-
-mod assembler;
-mod orientation;
-mod protocol;
-mod render;
-mod stream;
-mod wifi;
+//! upright inside a circle on black, fullscreen, and goes back to the previous network on
+//! quit (q, Escape, closing the window, Ctrl+C or a termination signal).
 
 use std::num::NonZeroU32;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Instant;
 
-use glutin::config::ConfigTemplateBuilder;
-use glutin::context::{ContextApi, ContextAttributesBuilder, PossiblyCurrentContext, Version};
+use glutin::config::{Config, ConfigTemplateBuilder};
+use glutin::context::{
+    ContextApi, ContextAttributesBuilder, GlProfile, NotCurrentContext, PossiblyCurrentContext,
+    Version,
+};
 use glutin::display::GetGlDisplay;
 use glutin::prelude::*;
 use glutin::surface::{Surface, SwapInterval, WindowSurface};
@@ -25,12 +21,14 @@ use winit::application::ApplicationHandler;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{Key, NamedKey};
-use winit::raw_window_handle::HasWindowHandle;
+use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::{Fullscreen, Window, WindowId};
 
-use orientation::{angle_degrees, factor_for, smooth, DEADBAND, UPRIGHT_OFFSET};
-use render::Renderer;
-use stream::{Exchange, Slot};
+use earcam_desktop::orientation::{DEADBAND, UPRIGHT_OFFSET, angle_degrees, factor_for, smooth};
+use earcam_desktop::render::Renderer;
+use earcam_desktop::signals::{self, QuitSignals};
+use earcam_desktop::stream::{self, Camera, Exchange, Slot};
+use earcam_desktop::wifi::Link;
 
 enum UserEvent {
     Frame,
@@ -61,19 +59,18 @@ impl App {
             .with_fullscreen(Some(Fullscreen::Borderless(None)));
         let (window, config) = DisplayBuilder::new()
             .with_window_attributes(Some(attrs))
-            .build(event_loop, ConfigTemplateBuilder::new(), |mut configs| {
-                configs.next().unwrap()
+            .build(event_loop, ConfigTemplateBuilder::new(), |configs| {
+                // No multisampling: every pixel comes from a shader anyway.
+                configs
+                    .min_by_key(|c| c.num_samples())
+                    .expect("no GL config")
             })?;
         let window = window.ok_or("no window")?;
         window.set_cursor_visible(false);
 
-        let display = config.display();
-        // GLES 3.0, so the shaders are the Android app's, unchanged.
-        let context_attrs = ContextAttributesBuilder::new()
-            .with_context_api(ContextApi::Gles(Some(Version::new(3, 0))))
-            .build(Some(window.window_handle()?.as_raw()));
-        let context = unsafe { display.create_context(&config, &context_attrs)? };
+        let context = create_context(&config, window.window_handle()?.as_raw())?;
         let surface_attrs = window.build_surface_attributes(Default::default())?;
+        let display = config.display();
         let surface = unsafe { display.create_window_surface(&config, &surface_attrs)? };
         let context = context.make_current(&surface)?;
         let _ = surface.set_swap_interval(&context, SwapInterval::Wait(NonZeroU32::MIN));
@@ -93,7 +90,8 @@ impl App {
         let Some(gl) = &mut self.gl else { return };
         if self.exchange.take(&mut self.front) {
             gl.renderer.upload(&self.front);
-            self.target = UPRIGHT_OFFSET - angle_degrees(self.front.y, self.front.z);
+            let g = self.front.gravity;
+            self.target = UPRIGHT_OFFSET - angle_degrees(g.y, g.z);
         }
         let now = Instant::now();
         let dt_ms = self
@@ -106,6 +104,27 @@ impl App {
         let size = gl.window.inner_size();
         gl.renderer.draw(size.width, size.height, self.angle);
         let _ = gl.surface.swap_buffers(&gl.context);
+    }
+}
+
+/// GLES 3.0 where available (Linux, most Windows drivers), so the shaders run exactly as
+/// on Android; otherwise desktop GL 3.3 core, which compiles the same shader source.
+fn create_context(
+    config: &Config,
+    window: RawWindowHandle,
+) -> Result<NotCurrentContext, glutin::error::Error> {
+    let display = config.display();
+    let gles = ContextAttributesBuilder::new()
+        .with_context_api(ContextApi::Gles(Some(Version::new(3, 0))))
+        .build(Some(window));
+    let gl = ContextAttributesBuilder::new()
+        .with_context_api(ContextApi::OpenGl(Some(Version::new(3, 3))))
+        .with_profile(GlProfile::Core)
+        .build(Some(window));
+    unsafe {
+        display
+            .create_context(config, &gles)
+            .or_else(|_| display.create_context(config, &gl))
     }
 }
 
@@ -167,40 +186,26 @@ impl ApplicationHandler<UserEvent> for App {
     }
 }
 
-/// Blocks the quit signals in this and every thread spawned after it, so they can be
-/// turned into a [`UserEvent::Quit`]: Ctrl+C in the terminal still restores the home network.
-fn block_quit_signals() -> libc::sigset_t {
-    unsafe {
-        let mut set: libc::sigset_t = std::mem::zeroed();
-        libc::sigemptyset(&mut set);
-        for sig in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP] {
-            libc::sigaddset(&mut set, sig);
-        }
-        libc::pthread_sigmask(libc::SIG_BLOCK, &set, std::ptr::null_mut());
-        set
-    }
-}
-
 fn main() {
-    let signals = block_quit_signals();
+    // Before anything spawns a thread, so every thread inherits the blocked signals.
+    let signals = QuitSignals::block();
     let event_loop = EventLoop::<UserEvent>::with_user_event()
         .build()
         .expect("event loop");
     let proxy = event_loop.create_proxy();
-    thread::spawn(move || {
-        let mut sig = 0;
-        unsafe { libc::sigwait(&signals, &mut sig) };
+    signals.spawn(move || {
         let _ = proxy.send_event(UserEvent::Quit);
     });
 
     let running = Arc::new(AtomicBool::new(true));
     let exchange = Arc::new(Exchange::default());
+    let link = Arc::new(Link::new());
     let worker = {
-        let (running, exchange, proxy) =
-            (running.clone(), exchange.clone(), event_loop.create_proxy());
+        let (running, exchange, link) = (running.clone(), exchange.clone(), link.clone());
+        let proxy = event_loop.create_proxy();
         thread::spawn(move || {
-            let result = wifi::connect(&running).and_then(|()| {
-                stream::run(&running, &exchange, || {
+            let result = link.connect(&running).and_then(|_| {
+                stream::run(&Camera::default(), &running, &exchange, || {
                     let _ = proxy.send_event(UserEvent::Frame);
                 })
                 .map_err(|e| format!("stream ended: {e}"))
@@ -223,9 +228,11 @@ fn main() {
     if let Err(e) = event_loop.run_app(&mut app) {
         eprintln!("{e}");
     }
+    // Close the window first: switching the WiFi back can take a few seconds.
     drop(app);
 
     running.store(false, Ordering::Relaxed);
     let _ = worker.join();
-    wifi::restore();
+    link.restore();
+    signals::finished();
 }

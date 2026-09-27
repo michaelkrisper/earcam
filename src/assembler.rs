@@ -12,15 +12,14 @@
 //!
 //! Frames and their buffers are recycled; steady-state streaming allocates nothing.
 
-use crate::protocol::{Chunk, CHUNK_PAYLOAD};
+use crate::protocol::{CHUNK_PAYLOAD, Chunk, Gravity};
 
 pub struct Frame {
     pub index: u8,
     /// The reassembled JPEG, valid once the frame has been returned.
     pub jpeg: Vec<u8>,
-    pub x: i32,
-    pub y: i32,
-    pub z: i32,
+    /// The gravity vector of the frame's last chunk to arrive.
+    pub gravity: Gravity,
     slots: Box<[u8]>,
     sizes: [u16; 256],
     received: usize,
@@ -33,9 +32,7 @@ impl Frame {
         Frame {
             index: 0,
             jpeg: Vec::with_capacity(128 * 1024),
-            x: 0,
-            y: 0,
-            z: 0,
+            gravity: Gravity::default(),
             slots: vec![0; 256 * CHUNK_PAYLOAD].into_boxed_slice(),
             sizes: [0; 256],
             received: 0,
@@ -78,21 +75,18 @@ impl Assembler {
 
     /// Feeds one chunk read from `data`; returns the frame if this chunk completed it.
     pub fn add(&mut self, chunk: &Chunk, data: &[u8]) -> Option<&Frame> {
+        let h = &chunk.header;
         if let Some(f) = self.returned.take() {
             self.spare.push(f);
         }
 
-        let pos = match self
-            .frames
-            .iter()
-            .position(|f| f.index == chunk.frame_index)
-        {
+        let pos = match self.frames.iter().position(|f| f.index == h.frame_index) {
             Some(pos) => pos,
             None => {
                 // A straggler for a frame that already completed or was given up on. Should
                 // the camera restart its counter instead, follow it after a burst of these.
                 if let Some(newest) = self.newest
-                    && newest.wrapping_sub(chunk.frame_index) < 128
+                    && newest.wrapping_sub(h.frame_index) < 128
                 {
                     self.late_chunks += 1;
                     if self.late_chunks < 256 {
@@ -100,25 +94,23 @@ impl Assembler {
                     }
                 }
                 self.late_chunks = 0;
-                self.newest = Some(chunk.frame_index);
-                self.new_frame(chunk.frame_index)
+                self.newest = Some(h.frame_index);
+                self.new_frame(h.frame_index)
             }
         };
 
         let frame = &mut self.frames[pos];
-        let idx = chunk.chunk_index as usize;
+        let idx = h.chunk_index as usize;
         if frame.sizes[idx] == 0 && chunk.payload_size > 0 {
             let src = &data[chunk.payload_offset..chunk.payload_offset + chunk.payload_size];
             frame.slots[idx * CHUNK_PAYLOAD..][..src.len()].copy_from_slice(src);
             frame.sizes[idx] = src.len() as u16;
             frame.received += 1;
         }
-        frame.x = chunk.x;
-        frame.y = chunk.y;
-        frame.z = chunk.z;
-        if chunk.is_last && chunk.total > 0 {
-            frame.last_chunk = Some(chunk.chunk_index);
-            frame.total = chunk.total as usize;
+        frame.gravity = h.gravity;
+        if h.is_last && h.total > 0 {
+            frame.last_chunk = Some(h.chunk_index);
+            frame.total = h.total as usize;
         }
 
         let last = frame.last_chunk?;
