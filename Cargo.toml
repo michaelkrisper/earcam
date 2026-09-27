@@ -1,0 +1,20 @@
+[package]
+name = "earcam-desktop"
+version = "0.1.0"
+edition = "2024"
+description = "Linux client for LMECHN / i4season WiFi ear cameras"
+license = "MIT"
+
+[dependencies]
+glow = "0.18.0"
+glutin = { version = "0.32.3", default-features = false, features = ["egl", "wayland", "x11"] }
+glutin-winit = { version = "0.5.0", default-features = false, features = ["egl", "wayland", "x11"] }
+libc = "0.2.189"
+# No client-side decorations: the window is always fullscreen.
+winit = { version = "0.30.13", default-features = false, features = ["rwh_06", "wayland", "wayland-dlopen", "x11"] }
+zune-jpeg = "0.5.15"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
