@@ -86,7 +86,8 @@ that arrives before the stream is registered, which makes them a useful sign of 
 
 JPEG frames are split across UDP datagrams, each a 16-byte header followed by the
 payload. This firmware sends one chunk per datagram with a 1280-byte payload (1296-byte
-datagrams) at 640x480. The reference client allows several chunks packed back to back in
+datagrams). The LMECHN N30 Pro streams 480x480 at a steady ~17 fps, ~16-19 KB per JPEG
+(15-16 chunks); decoding one takes ~4 ms on a Pixel 4a 5G. The reference client allows several chunks packed back to back in
 one datagram, with payloads up to 1456 bytes, so EarCam parses that case too.
 
 | Offset | Size | Field |
@@ -102,10 +103,18 @@ one datagram, with payloads up to 1456 bytes, so EarCam parses that case too.
 | 12 | 2 | frame width |
 | 14 | 2 | frame height |
 
-Reassembly: every chunk but the last carries a full payload, so the first chunk seen
-establishes the stride. Offsets are relative to that first chunk index, with
-`+256` added when the 8-bit counter has wrapped. A frame is complete once the total is
-known and the accumulated size exceeds `stride * (total - 1)`.
+Reassembly: the chunk index is a **global** 8-bit counter that keeps running across
+frames (a frame of 15 chunks might be `112..126`), so a frame's first index is only known
+from its last chunk: `first = last - total + 1` (mod 256). Chunks are therefore parked by
+index until the last one arrives, and a frame is complete when every index in that range
+is present. The earlier approach — offsets relative to the first chunk *seen*, complete
+once enough bytes arrived — breaks on reordered first chunks and on duplicates.
+
+The frame index wraps every 256 frames (~15 s at 17 fps). A frame that lost a chunk must
+be dropped within a few frames: left in place, its stale chunks get merged into the next
+frame with the same index 256 frames later, which then completes one chunk early, leaves
+its real last chunk behind as the next stale entry, and keeps the corruption going
+indefinitely (observed on hardware as an undecodable frame every ~15 s).
 
 ### Resolution
 
@@ -113,6 +122,12 @@ known and the accumulated size exceeds `stride * (total - 1)`.
 only ever calls the getter — it logs the result and never changes it. The camera appears
 to stream at its native resolution, so EarCam does not touch this either. The exact
 payload layout is unverified.
+
+480x480 is native, not a mode to escape: the stock app never calls the setter, has no UI
+for it, and when saving a photo from a 480x480 stream it upscales it to 2300x2300
+(`I4seasonUsbCamera.isSavePhotoSuccful`) — the "HD" photos are interpolated. Whether a
+unit could switch at all is advertised by `CAMCAP_ResolutionSwitching` (`0x40`) in the
+capability field of the device info, which has not been checked on the N30 Pro.
 
 ### Orientation
 

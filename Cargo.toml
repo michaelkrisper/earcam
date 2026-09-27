@@ -1,0 +1,57 @@
+[package]
+name = "earcam"
+version = "0.2.0"
+edition = "2024"
+description = "Client for i4season WiFi ear cameras (LMECHN and other brands) on Android, Linux and Windows"
+license = "MIT"
+repository = "https://github.com/michaelkrisper/earcam"
+readme = "README.md"
+keywords = ["otoscope", "camera", "wifi", "opengl", "android"]
+categories = ["multimedia::video"]
+publish = false
+
+# One library for every platform. Android loads it as a NativeActivity (built as a
+# cdylib by `cargo ndk ... rustc --crate-type cdylib`, see android/app/build.gradle.kts);
+# the desktop binary is a thin wrapper around it.
+[lib]
+name = "earcam"
+
+[[bin]]
+name = "earcam"
+path = "src/main.rs"
+
+[dependencies]
+glow = "0.18.0"
+# EGL on Linux and Android, WGL on Windows. GLES 3.0 where available, so the shaders run
+# as written; desktop GL 3.3 is the fallback where no GLES context exists.
+glutin = { version = "0.32.3", default-features = false, features = ["egl", "wayland", "x11", "wgl"] }
+glutin-winit = { version = "0.5.0", default-features = false, features = ["egl", "wayland", "x11", "wgl"] }
+log = "0.4.34"
+socket2 = "0.6.5"
+# No client-side decorations: the window is always fullscreen.
+winit = { version = "0.30.13", default-features = false, features = ["rwh_06", "wayland", "wayland-dlopen", "x11", "android-native-activity"] }
+zune-jpeg = "0.5.15"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2.189"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_NetworkManagement_Ndis",
+    "Win32_NetworkManagement_WiFi",
+    "Win32_System_Console",
+] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21.1"
+# The version winit's android-activity uses, so its NativeWindow is this one.
+ndk = { version = "0.9.0", features = ["api-level-30", "nativewindow"] }
+ndk-sys = "0.6.0"
+# Set up by android-activity: the JavaVM and the Activity, for JNI.
+ndk-context = "0.1.1"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

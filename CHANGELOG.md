@@ -1,0 +1,50 @@
+# Changelog
+
+All notable changes are documented here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
+[Semantic Versioning](https://semver.org/). The Android app and the desktop client were
+separate projects up to 0.1; from 0.2 they are one codebase.
+
+## [0.2.0] - 2026-09-27
+
+### Added
+- One Rust codebase for Android, Linux and Windows. On Android, the platform's
+  NativeActivity loads the Rust library directly; there is no Java or Kotlin left.
+- Cameras of any i4season brand are found, not only `LMECHN-*`. Open networks with a
+  known brand prefix or a locally administered BSSID are candidates, and a network
+  counts as a camera once it answers GetDeviceInfo. The chip, firmware and battery level
+  are logged.
+- Windows support: WiFi switching through the native WLAN API with a temporary profile,
+  a console Ctrl handler for a clean quit, and a desktop GL 3.3 fallback. Built and
+  tested in CI, not yet run against a camera.
+- The desktop restores whichever network was active at start; `Katze` is only the
+  fallback.
+- Verified on hardware: Linux desktop, and the Android app on a Pixel 4a 5G (17 fps,
+  camera found through the system picker by its BSSID).
+- End-to-end tests against a simulated camera on localhost, and unit tests for
+  discovery, device info and touch gestures.
+- CI builds and tests all three platforms. Tagging `v*` publishes one release with the
+  APK, the Linux archive, the Windows executable and checksums.
+
+### Changed
+- Android keeps the screen on with a wake lock (`WAKE_LOCK` permission) instead of a
+  window flag.
+- The desktop retries reconnecting the previous WiFi, whose first association after
+  leaving the camera can fail.
+- The video port is registered from the video socket itself, so frames pass stateful
+  firewalls as replies.
+- Android: the APK carries a 1.1 MB native library instead of ~56 KB of Kotlin, the
+  price of sharing one codebase. JPEG decoding moved from `BitmapFactory` to zune-jpeg.
+- Android: the network request matches open networks with a locally administered BSSID
+  instead of the `LMECHN` name prefix, so other brands appear in the system picker too.
+
+## [0.1.0] - 2026-09-27
+
+### Added
+- Desktop client for Linux (Rust): joins `LMECHN-*` through NetworkManager, streams at
+  the camera's 17 fps, renders fullscreen with the Android app's deblocking and rotation
+  shaders, and reconnects the home network on quit.
+- Android app (Kotlin): OpenGL rendering with luma and chroma deblocking, pinch zoom,
+  rotation from the probe's gravity sensor, app-scoped camera network so mobile data
+  stays up, and the port registration (type `0x16`) that actually starts this
+  firmware's stream.
