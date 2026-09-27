@@ -21,6 +21,12 @@ that sets an SSID or passphrase. Its address is fixed.
 | Command port | UDP 10005 |
 | Stream port | UDP 10006 |
 | Notify port | UDP 10007 (on the *client*) |
+| Other | TCP 5007 is open (full scan of 1–10010) but sends no banner; purpose unknown |
+| Client address | DHCP, first lease `192.168.1.10` |
+
+The LMECHN-59F77 unit (N30 Pro) reports itself as a Beken **BK7231U** (see
+[Device info](#device-info)). Its USB-C port is charge-only: plugged into a PC, nothing
+enumerates.
 
 ## Command messages
 
@@ -40,7 +46,52 @@ Known types: `0x01` GetDeviceInfo, `0x02` GetLicense, `0x03` SetLicense, `0x04` 
 `0x0e` SetCameraConfig.
 
 The `libWifiCamera.so` shipped with the current app adds `0x10`–`0x13` (sent to 10005)
-and `0x14`–`0x16` (sent to 10006) on top of that table.
+and `0x14`–`0x16` (sent to 10006) on top of that table, plus `0x07`/`0x08` and
+`0x17`–`0x19` for firmware update and `0x1a` for setting the clock.
+
+## Device info
+
+Type `0x01` with no payload, e.g. `ee ff ee ff 01 00 01 00 01 00 00 00`. The reply payload
+is exactly 128 bytes (the client rejects anything else):
+
+| Offset | Size | Field | LMECHN-59F77 |
+|---|---|---|---|
+| 0x00 | 1 | unknown | `05` |
+| 0x01 | 32 | vendor | `YPC` (followed by leftover bytes: `ota ok`, `sys_cfgs.license = `) |
+| 0x21 | 32 | product | `BK7231U-XRH-FBPRO` |
+| 0x41 | 16 | firmware version | `HKV48B` |
+| 0x51 | 32 | SSID | `LMECHN-59F77` |
+| 0x71 | 6 | MAC | `82:77:8a:01:58:74` |
+| 0x77 | 2 | power: battery % = `>> 9`, bit 8 = charging | 97 %, not charging |
+| 0x79 | 1 | capability bits | `0x03` |
+| 0x7a | 1 | work mode 1 | |
+| 0x7b | 1 | work mode 2 (signed) | |
+| 0x7c | 1 | flags: bit 4 = wants time set, bit 6 = record status sync | `0x00` |
+
+If bit 4 of the flags is set, the stock client follows up with type `0x1a` (year `uint16`,
+then month, day, hour, minute, second as bytes). A read-only query must stop at `0x01`.
+
+## Firmware update
+
+Reconstructed from `cameraWifiupdateFirmware` in `libWifiCamera.so`; **never exercised**.
+The stock app declares `WifiCamera.updateFirmware(String)` but never calls it, ships no
+image and has no download URL (`Constant.UPDATA_url`, `simicloud.com/.../version.xml`, is
+unused and returns 404). No image for these cameras is publicly available.
+
+All on UDP 10005, a fresh socket per message, 100 ms receive timeout, up to 30 retries.
+The header length field stays `0` throughout.
+
+1. Start: type `0x06`, no payload. The ack must carry a 2-byte payload: the chunk size
+   (`uint16`) the camera wants. The client caps it at 4084.
+2. Data: type `0x07`, header plus raw file bytes, one chunk per message. No offset,
+   index or checksum; order comes only from the incrementing message id. Every chunk
+   must be acked with error `0`.
+3. End: type `0x08`, no payload.
+
+The MCU path is identical with types `0x17`/`0x18`/`0x19`. The client sends the file as
+is: no header parsing, size, MD5 or version check. Whatever validation exists happens on
+the camera; Beken OTA images are normally RBL-wrapped and CRC-checked by the bootloader,
+but that is unverified here.
 
 ## Starting the stream
 
