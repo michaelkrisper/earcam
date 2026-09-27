@@ -5,7 +5,7 @@ All notable changes are documented here. The format follows
 [Semantic Versioning](https://semver.org/). The Android app and the desktop client were
 separate projects up to 0.1; from 0.2 they are one codebase.
 
-## [0.2.0] - Unreleased
+## [0.2.0] - 2026-09-27
 
 ### Added
 - One Rust codebase for Android, Linux and Windows. On Android, the platform's
@@ -19,12 +19,18 @@ separate projects up to 0.1; from 0.2 they are one codebase.
   tested in CI, not yet run against a camera.
 - The desktop restores whichever network was active at start; `Katze` is only the
   fallback.
+- Verified on hardware: Linux desktop, and the Android app on a Pixel 4a 5G (17 fps,
+  camera found through the system picker by its BSSID).
 - End-to-end tests against a simulated camera on localhost, and unit tests for
   discovery, device info and touch gestures.
 - CI builds and tests all three platforms. Tagging `v*` publishes one release with the
   APK, the Linux archive, the Windows executable and checksums.
 
 ### Changed
+- Android keeps the screen on with a wake lock (`WAKE_LOCK` permission) instead of a
+  window flag.
+- The desktop retries reconnecting the previous WiFi, whose first association after
+  leaving the camera can fail.
 - The video port is registered from the video socket itself, so frames pass stateful
   firewalls as replies.
 - Android: the APK carries a 1.1 MB native library instead of ~56 KB of Kotlin, the
