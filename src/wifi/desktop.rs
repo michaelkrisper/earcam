@@ -22,6 +22,7 @@ const SEARCH_TIMEOUT: Duration = Duration::from_secs(60);
 const SCAN_INTERVAL: Duration = Duration::from_secs(2);
 /// How long a freshly joined network gets to answer as a camera.
 const IDENTIFY_TIMEOUT: Duration = Duration::from_secs(4);
+const RESTORE_ATTEMPTS: u32 = 3;
 
 /// Joins the camera and remembers where to return to.
 #[derive(Default)]
@@ -101,9 +102,18 @@ impl Link {
         {
             return;
         }
-        log::info!("reconnecting to {target}");
-        if let Err(e) = backend.activate(target) {
-            log::warn!("{e}");
+        // Right after leaving the camera the first association sometimes fails, and
+        // NetworkManager then blocks autoconnect for minutes; a short retry gets through.
+        for attempt in 1..=RESTORE_ATTEMPTS {
+            log::info!("reconnecting to {target}");
+            match backend.activate(target) {
+                Ok(()) => return,
+                Err(e) if attempt < RESTORE_ATTEMPTS => {
+                    log::info!("{e}");
+                    thread::sleep(Duration::from_secs(2));
+                }
+                Err(e) => log::warn!("{e}"),
+            }
         }
     }
 }

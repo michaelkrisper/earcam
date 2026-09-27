@@ -188,6 +188,9 @@ pub fn run(
                 .and_then(|_| control.recv(&mut reply))
             {
                 Ok(n) => log_reply(&reply[..n], camera.command_port),
+                Err(e) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {
+                    log::warn!("camera not answering")
+                }
                 Err(e) => log::warn!("device info: {e}"),
             }
             let register = protocol::set_pic_port(video_port, next_id());
