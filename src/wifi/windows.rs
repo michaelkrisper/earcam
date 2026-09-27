@@ -11,16 +11,17 @@ use std::time::{Duration, Instant};
 
 use windows_sys::Win32::Foundation::{ERROR_SUCCESS, HANDLE};
 use windows_sys::Win32::NetworkManagement::WiFi::{
-    DOT11_SSID, WLAN_AVAILABLE_NETWORK_LIST, WLAN_CONNECTION_ATTRIBUTES,
-    WLAN_CONNECTION_PARAMETERS, WLAN_INTERFACE_INFO_LIST, WlanCloseHandle, WlanConnect,
-    WlanEnumInterfaces, WlanFreeMemory, WlanGetAvailableNetworkList, WlanOpenHandle,
-    WlanQueryInterface, WlanScan, dot11_BSS_type_infrastructure, wlan_connection_mode_profile,
+    DOT11_SSID, WLAN_BSS_LIST, WLAN_CONNECTION_ATTRIBUTES, WLAN_CONNECTION_PARAMETERS,
+    WLAN_INTERFACE_INFO_LIST, WlanCloseHandle, WlanConnect, WlanEnumInterfaces, WlanFreeMemory,
+    WlanGetNetworkBssList, WlanOpenHandle, WlanQueryInterface, WlanScan, dot11_BSS_type_any,
+    dot11_BSS_type_infrastructure, wlan_connection_mode_profile,
     wlan_connection_mode_temporary_profile, wlan_interface_state_connected,
     wlan_intf_opcode_current_connection,
 };
 use windows_sys::core::GUID;
 
 use super::{Connection, open_profile_xml};
+use crate::discovery::Network;
 
 /// How long to wait for an association to complete.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -119,24 +120,41 @@ impl Backend {
         }
     }
 
-    /// Visible SSIDs. Triggers a fresh scan, whose results show up on the next call;
-    /// the caller polls every couple of seconds anyway.
-    pub fn scan(&self) -> Result<Vec<String>, String> {
+    /// Visible networks, one entry per access point. Triggers a fresh scan, whose
+    /// results show up on the next call; the caller polls every couple of seconds anyway.
+    pub fn scan(&self) -> Result<Vec<Network>, String> {
         unsafe {
             // Refused while a scan is running, which is fine.
             WlanScan(self.handle, &self.interface, null(), null(), null());
-            let mut list: *mut WLAN_AVAILABLE_NETWORK_LIST = null_mut();
+            let mut list: *mut WLAN_BSS_LIST = null_mut();
+            // No SSID filter: every BSS, whatever its type and security.
             check(
-                "WlanGetAvailableNetworkList",
-                WlanGetAvailableNetworkList(self.handle, &self.interface, 0, null(), &mut list),
+                "WlanGetNetworkBssList",
+                WlanGetNetworkBssList(
+                    self.handle,
+                    &self.interface,
+                    null(),
+                    dot11_BSS_type_any,
+                    0,
+                    null(),
+                    &mut list,
+                ),
             )?;
-            let networks = std::slice::from_raw_parts(
-                (*list).Network.as_ptr(),
+            let entries = std::slice::from_raw_parts(
+                (*list).wlanBssEntries.as_ptr(),
                 (*list).dwNumberOfItems as usize,
             );
-            let ssids = networks.iter().map(|n| ssid_string(&n.dot11Ssid)).collect();
+            let networks = entries
+                .iter()
+                .map(|e| Network {
+                    ssid: ssid_string(&e.dot11Ssid),
+                    bssid: Some(e.dot11Bssid),
+                    // The 802.11 capability "privacy" bit: WEP or WPA required.
+                    open: e.usCapabilityInformation & 0x0010 == 0,
+                })
+                .collect();
             WlanFreeMemory(list as *const c_void);
-            Ok(ssids)
+            Ok(networks)
         }
     }
 

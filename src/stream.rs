@@ -20,7 +20,7 @@ use zune_jpeg::errors::DecodeErrors;
 use zune_jpeg::zune_core::bytestream::ZCursor;
 
 use crate::assembler::Assembler;
-use crate::protocol::{self, Gravity, parse_chunk, parse_command};
+use crate::protocol::{self, DeviceInfo, Gravity, parse_chunk, parse_command};
 
 /// Where the camera listens. Always the defaults on real hardware; tests point it at a
 /// simulated camera on localhost.
@@ -39,6 +39,63 @@ impl Default for Camera {
             stream_port: protocol::STREAM_PORT,
         }
     }
+}
+
+/// Which network the camera's sockets use. The default route everywhere except on
+/// Android, where the camera is a secondary network next to mobile data and each socket
+/// is bound to it, so the rest of the phone stays online.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Route {
+    /// `Network.getNetworkHandle()` of the camera network.
+    #[cfg(target_os = "android")]
+    pub network: Option<u64>,
+}
+
+impl Route {
+    /// Makes `socket` send and receive through this route.
+    pub fn bind(&self, socket: &UdpSocket) -> io::Result<()> {
+        #[cfg(target_os = "android")]
+        if let Some(network) = self.network {
+            use std::os::fd::AsRawFd;
+            if unsafe { ndk_sys::android_setsocknetwork(network, socket.as_raw_fd()) } != 0 {
+                return Err(io::Error::last_os_error());
+            }
+        }
+        let _ = socket;
+        Ok(())
+    }
+
+    fn socket(&self) -> io::Result<UdpSocket> {
+        let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))?;
+        self.bind(&socket)?;
+        Ok(socket)
+    }
+}
+
+/// Asks whatever answers at `camera` for its device info, re-asking every 400 ms until
+/// `timeout`. A reply identifies a camera regardless of brand or network name.
+pub fn probe(camera: &Camera, route: &Route, timeout: Duration) -> Option<DeviceInfo> {
+    let socket = route.socket().ok()?;
+    socket
+        .set_read_timeout(Some(Duration::from_millis(400)))
+        .ok()?;
+    let query = protocol::command(protocol::TYPE_GET_DEVICE_INFO, 1, &[], 0);
+    let addr = SocketAddrV4::new(camera.ip, camera.command_port);
+    let deadline = Instant::now() + timeout;
+    let mut reply = [0u8; 512];
+    while Instant::now() < deadline {
+        // Fails while the interface is still coming up; just try again.
+        if socket.send_to(&query, addr).is_err() {
+            std::thread::sleep(Duration::from_millis(400));
+            continue;
+        }
+        if let Ok(n) = socket.recv(&mut reply)
+            && let Some(info) = DeviceInfo::parse(&reply[..n])
+        {
+            return Some(info);
+        }
+    }
+    None
 }
 
 /// A decoded RGB frame and the gravity reading that came with it. Recycled, never shared.
@@ -83,17 +140,18 @@ impl Exchange {
 const STALL: Duration = Duration::from_millis(1500);
 const RETRY: Duration = Duration::from_secs(2);
 
-/// Streams from `camera` until `running` goes false, calling `on_frame` after each frame
+/// Streams from `camera` through `route` until `running` goes false, calling `on_frame` after each frame
 /// published to `exchange`. Fails only if a socket does; a silent camera is retried.
 pub fn run(
     camera: &Camera,
+    route: &Route,
     running: &AtomicBool,
     exchange: &Exchange,
     mut on_frame: impl FnMut(),
 ) -> io::Result<()> {
-    let control = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))?;
+    let control = route.socket()?;
     // Port 0: the camera is told afterwards which port it ended up on.
-    let video = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))?;
+    let video = route.socket()?;
     control.set_read_timeout(Some(Duration::from_millis(1500)))?;
     video.set_read_timeout(Some(Duration::from_millis(500)))?;
     // Frames arrive as bursts of ~1.3 KB datagrams; the default buffer drops some, and
@@ -130,11 +188,11 @@ pub fn run(
                 .and_then(|_| control.recv(&mut reply))
             {
                 Ok(n) => log_reply(&reply[..n], camera.command_port),
-                Err(e) => eprintln!("device info: {e}"),
+                Err(e) => log::warn!("device info: {e}"),
             }
             let register = protocol::set_pic_port(video_port, next_id());
             if let Err(e) = video.send_to(&register, stream_addr) {
-                eprintln!("register stream port: {e}");
+                log::warn!("register stream port: {e}");
             }
         }
 
@@ -167,7 +225,7 @@ pub fn run(
 
             let t0 = Instant::now();
             if let Err(e) = decode(&frame.jpeg, &mut back) {
-                eprintln!(
+                log::warn!(
                     "undecodable frame {}, {} bytes: {e}",
                     frame.index,
                     frame.jpeg.len()
@@ -208,7 +266,7 @@ pub fn decode(jpeg: &[u8], into: &mut Slot) -> Result<(), DecodeErrors> {
 
 fn log_reply(data: &[u8], port: u16) {
     if let Some(h) = parse_command(data) {
-        eprintln!(
+        log::info!(
             "cmd 0x{:02x} -> {port}: {} bytes, err={}",
             h.ty,
             data.len(),
@@ -240,7 +298,7 @@ impl Stats {
         if elapsed < Duration::from_secs(1) {
             return;
         }
-        eprintln!(
+        log::info!(
             "{:.1} fps, decode {:.2} ms, {w}x{h}, {bytes} bytes, x={} y={} z={}",
             self.frames as f64 / elapsed.as_secs_f64(),
             self.decode.as_secs_f64() * 1e3 / self.frames as f64,

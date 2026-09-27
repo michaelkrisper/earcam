@@ -4,6 +4,7 @@
 use std::process::Command;
 
 use super::Connection;
+use crate::discovery::{Network, parse_mac};
 
 /// Name of the in-memory profile for the camera.
 const PROFILE: &str = "earcam";
@@ -46,12 +47,12 @@ impl Backend {
         }))
     }
 
-    /// Visible SSIDs, after asking for a fresh scan.
-    pub fn scan(&self) -> Result<Vec<String>, String> {
+    /// Visible networks, after asking for a fresh scan.
+    pub fn scan(&self) -> Result<Vec<Network>, String> {
         let list = [
             "-t",
             "-f",
-            "SSID",
+            "SSID,BSSID,SECURITY",
             "device",
             "wifi",
             "list",
@@ -61,11 +62,7 @@ impl Backend {
         // A forced rescan is refused while one is already running; the cached list is
         // fine then.
         let out = nmcli(&[&list[..], &["--rescan", "yes"]].concat()).or_else(|_| nmcli(&list))?;
-        Ok(out
-            .lines()
-            .map(unescape)
-            .filter(|s| !s.is_empty())
-            .collect())
+        Ok(out.lines().filter_map(parse_scan_line).collect())
     }
 
     pub fn join(&self, ssid: &str) -> Result<(), String> {
@@ -133,6 +130,17 @@ fn split_terse(line: &str) -> Vec<String> {
     fields
 }
 
+/// One line of `nmcli -t -f SSID,BSSID,SECURITY device wifi list`. SECURITY is empty
+/// (or `--`) for an open network, else e.g. `WPA2`.
+fn parse_scan_line(line: &str) -> Option<Network> {
+    let [ssid, bssid, security]: [String; 3] = split_terse(line).try_into().ok()?;
+    Some(Network {
+        ssid,
+        bssid: parse_mac(&bssid),
+        open: security.is_empty() || security == "--",
+    })
+}
+
 /// A single `nmcli -t` value.
 fn unescape(value: &str) -> String {
     split_terse(value).join(":")
@@ -147,6 +155,17 @@ mod tests {
         assert_eq!(split_terse("wlp3s0:wifi"), ["wlp3s0", "wifi"]);
         assert_eq!(split_terse(r"a\:b:c\\d"), [r"a:b", r"c\d"]);
         assert_eq!(split_terse("lo:"), ["lo", ""]);
+    }
+
+    #[test]
+    fn parses_scan_lines() {
+        let camera = parse_scan_line(r"LMECHN-59F77:82\:77\:8A\:01\:58\:74:").unwrap();
+        assert_eq!(camera.ssid, "LMECHN-59F77");
+        assert_eq!(camera.bssid, parse_mac("82:77:8a:01:58:74"));
+        assert!(camera.open);
+        let home = parse_scan_line(r"Katze:E4\:E1\:30\:C8\:F9\:6E:WPA2").unwrap();
+        assert!(!home.open);
+        assert!(parse_scan_line("garbage").is_none());
     }
 
     #[test]

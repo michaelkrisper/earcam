@@ -70,6 +70,65 @@ pub fn parse_command(data: &[u8]) -> Option<CommandHeader> {
     })
 }
 
+/// Size of the GetDeviceInfo reply payload; the stock client rejects anything else.
+pub const DEVICE_INFO_SIZE: usize = 128;
+
+/// The camera's answer to [`TYPE_GET_DEVICE_INFO`]. Getting one at all is what identifies
+/// a network as a camera, whatever the brand on the box.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeviceInfo {
+    /// Firmware vendor tag, e.g. `YPC`.
+    pub vendor: String,
+    /// The chip and board, e.g. `BK7231U-XRH-FBPRO` (Beken BK7231U).
+    pub product: String,
+    pub firmware: String,
+    pub ssid: String,
+    pub mac: [u8; 6],
+    pub battery_percent: u8,
+    pub charging: bool,
+}
+
+impl DeviceInfo {
+    /// Parses a complete reply (header and 128-byte payload).
+    pub fn parse(reply: &[u8]) -> Option<DeviceInfo> {
+        let h = parse_command(reply)?;
+        if h.ty != TYPE_GET_DEVICE_INFO || h.error != 0 {
+            return None;
+        }
+        let p = reply.get(COMMAND_HEADER_SIZE..COMMAND_HEADER_SIZE + DEVICE_INFO_SIZE)?;
+        // Fixed-size, NUL-terminated fields; the vendor field has leftover bytes after it.
+        let text = |range: std::ops::Range<usize>| {
+            let field = &p[range];
+            let end = field.iter().position(|&b| b == 0).unwrap_or(field.len());
+            String::from_utf8_lossy(&field[..end]).trim().to_owned()
+        };
+        let power = u16::from_le_bytes([p[0x77], p[0x78]]);
+        Some(DeviceInfo {
+            vendor: text(0x01..0x21),
+            product: text(0x21..0x41),
+            firmware: text(0x41..0x51),
+            ssid: text(0x51..0x71),
+            mac: p[0x71..0x77].try_into().unwrap(),
+            battery_percent: (power >> 9) as u8,
+            charging: power & 0x100 != 0,
+        })
+    }
+}
+
+impl std::fmt::Display for DeviceInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} ({}), firmware {}, battery {}%{}",
+            self.product,
+            self.vendor,
+            self.firmware,
+            self.battery_percent,
+            if self.charging { ", charging" } else { "" },
+        )
+    }
+}
+
 /// The probe's gravity vector, ~60 units at 1 g. x lies along the probe, so the roll
 /// around it is `atan2(z, y)`.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -257,6 +316,45 @@ pub(crate) mod tests {
             };
             assert_eq!(Gravity::unpack(g.pack()), g);
         }
+    }
+
+    /// The LMECHN-59F77's reply, rebuilt from the fields logged in docs/protocol.md.
+    pub(crate) fn lmechn_device_info() -> Vec<u8> {
+        let mut reply = command(TYPE_GET_DEVICE_INFO, 1, &[0; DEVICE_INFO_SIZE], 128);
+        let p = &mut reply[COMMAND_HEADER_SIZE..];
+        p[0] = 5;
+        p[0x01..0x0f].copy_from_slice(b"YPC\0ota ok\0sys");
+        p[0x21..0x32].copy_from_slice(b"BK7231U-XRH-FBPRO");
+        p[0x41..0x47].copy_from_slice(b"HKV48B");
+        p[0x51..0x5d].copy_from_slice(b"LMECHN-59F77");
+        p[0x71..0x77].copy_from_slice(&[0x82, 0x77, 0x8a, 0x01, 0x58, 0x74]);
+        p[0x77..0x79].copy_from_slice(&(97u16 << 9).to_le_bytes());
+        reply
+    }
+
+    #[test]
+    fn parses_device_info() {
+        let info = DeviceInfo::parse(&lmechn_device_info()).unwrap();
+        assert_eq!(info.vendor, "YPC");
+        assert_eq!(info.product, "BK7231U-XRH-FBPRO");
+        assert_eq!(info.firmware, "HKV48B");
+        assert_eq!(info.ssid, "LMECHN-59F77");
+        assert_eq!(info.mac, [0x82, 0x77, 0x8a, 0x01, 0x58, 0x74]);
+        assert_eq!((info.battery_percent, info.charging), (97, false));
+        assert_eq!(
+            info.to_string(),
+            "BK7231U-XRH-FBPRO (YPC), firmware HKV48B, battery 97%"
+        );
+    }
+
+    #[test]
+    fn device_info_rejects_short_or_failed_replies() {
+        let full = lmechn_device_info();
+        assert!(DeviceInfo::parse(&full[..100]).is_none());
+        let mut failed = full.clone();
+        failed[9] = 1;
+        assert!(DeviceInfo::parse(&failed).is_none());
+        assert!(DeviceInfo::parse(&set_pic_port(1, 1)).is_none());
     }
 
     #[allow(clippy::too_many_arguments)]

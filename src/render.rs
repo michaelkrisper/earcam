@@ -5,7 +5,7 @@
 //!    16x16 one in chroma. Like H.264's in-loop filter, this only touches pixels next to a
 //!    block boundary where both sides are flat and the step is small, i.e. an artifact
 //!    rather than a real edge, and spreads the step into a ramp.
-//! 2. Rotation and circular mask, plain bilinear sampling. Anything sharper than bilinear
+//! 2. Rotation, zoom and circular mask, plain bilinear sampling. Anything sharper than bilinear
 //!    was tried on the Android app and turns the block grid into a mosaic.
 //!
 //! The mask hides the corners of the square image, which would otherwise sweep around and
@@ -19,7 +19,7 @@ use glow::{
 
 use crate::stream::Slot;
 
-const MASK_OVERSCAN: f32 = 1.1;
+use crate::gestures::{MASK_OVERSCAN, Zoom};
 
 pub struct Renderer {
     gl: glow::Context,
@@ -32,6 +32,8 @@ pub struct Renderer {
     u_center: Option<NativeUniformLocation>,
     u_radius: Option<NativeUniformLocation>,
     u_rotation: Option<NativeUniformLocation>,
+    u_zoom: Option<NativeUniformLocation>,
+    u_pan: Option<NativeUniformLocation>,
 }
 
 impl Renderer {
@@ -52,6 +54,8 @@ impl Renderer {
                 u_center: gl.get_uniform_location(display, "uCenter"),
                 u_radius: gl.get_uniform_location(display, "uRadius"),
                 u_rotation: gl.get_uniform_location(display, "uRotation"),
+                u_zoom: gl.get_uniform_location(display, "uZoom"),
+                u_pan: gl.get_uniform_location(display, "uPan"),
                 gl,
                 camera_tex,
                 deblocked_tex,
@@ -129,7 +133,7 @@ impl Renderer {
     }
 
     /// Draws the deblocked frame turned clockwise by `angle` degrees.
-    pub fn draw(&self, width: u32, height: u32, angle: f32) {
+    pub fn draw(&self, width: u32, height: u32, angle: f32, zoom: Zoom) {
         let gl = &self.gl;
         let (w, h) = (width as f32, height as f32);
         let rad = angle.to_radians();
@@ -144,6 +148,8 @@ impl Renderer {
             gl.uniform_2_f32(self.u_center.as_ref(), w / 2.0, h / 2.0);
             gl.uniform_1_f32(self.u_radius.as_ref(), w.min(h) / 2.0 * MASK_OVERSCAN);
             gl.uniform_2_f32(self.u_rotation.as_ref(), rad.cos(), rad.sin());
+            gl.uniform_1_f32(self.u_zoom.as_ref(), zoom.scale);
+            gl.uniform_2_f32(self.u_pan.as_ref(), zoom.pan_x, zoom.pan_y);
             gl.draw_arrays(glow::TRIANGLES, 0, 3);
         }
     }
@@ -303,11 +309,13 @@ uniform sampler2D uTex;
 uniform vec2 uCenter;
 uniform float uRadius;
 uniform vec2 uRotation; // cos, sin of the clockwise image rotation
+uniform float uZoom;
+uniform vec2 uPan;      // circle centre offset from uCenter, pixels, y down
 out vec4 color;
 void main() {
     // Offset from the circle centre, y pointing down like the image rows.
-    vec2 p = vec2(gl_FragCoord.x - uCenter.x, uCenter.y - gl_FragCoord.y);
-    float inside = clamp(uRadius - length(p) + 0.5, 0.0, 1.0);
+    vec2 p = (vec2(gl_FragCoord.x - uCenter.x, uCenter.y - gl_FragCoord.y) - uPan) / uZoom;
+    float inside = clamp((uRadius - length(p)) * uZoom + 0.5, 0.0, 1.0);
     // Undo the image rotation to find where this pixel samples it.
     vec2 q = vec2(uRotation.x * p.x + uRotation.y * p.y, uRotation.x * p.y - uRotation.y * p.x);
     vec2 uv = q / (2.0 * uRadius) + 0.5;

@@ -8,10 +8,10 @@ use std::sync::{Arc, mpsc};
 use std::thread;
 use std::time::Duration;
 
-use earcam_desktop::protocol::{
+use earcam::protocol::{
     self, ChunkHeader, Gravity, TYPE_GET_DEVICE_INFO, TYPE_SET_PIC_PORT, parse_command,
 };
-use earcam_desktop::stream::{self, Camera, Exchange, Slot};
+use earcam::stream::{self, Camera, Exchange, Route, Slot};
 
 const FRAME: &[u8] = include_bytes!("data/frame.jpg");
 /// What the LMECHN firmware puts in each datagram.
@@ -61,7 +61,7 @@ impl FakeCamera {
                 if let Ok((n, from)) = command.recv_from(&mut buf) {
                     let h = parse_command(&buf[..n]).expect("command header");
                     assert_eq!(h.ty, TYPE_GET_DEVICE_INFO);
-                    command.send_to(&ack(h.ty, h.id), from).unwrap();
+                    command.send_to(&device_info(h.id), from).unwrap();
                 }
             }
         });
@@ -99,6 +99,18 @@ impl Drop for FakeCamera {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
     }
+}
+
+/// A GetDeviceInfo reply as a Beken-based unit sends it: 128-byte payload with vendor,
+/// product (chip), firmware and SSID at fixed offsets.
+fn device_info(id: u16) -> Vec<u8> {
+    let mut payload = [0u8; protocol::DEVICE_INFO_SIZE];
+    payload[0x01..0x04].copy_from_slice(b"YPC");
+    payload[0x21..0x32].copy_from_slice(b"BK7231U-XRH-FBPRO");
+    payload[0x41..0x47].copy_from_slice(b"HKV48B");
+    payload[0x51..0x5a].copy_from_slice(b"SIMCAM-01");
+    payload[0x77..0x79].copy_from_slice(&(80u16 << 9 | 0x100).to_le_bytes());
+    protocol::command(TYPE_GET_DEVICE_INFO, id, &payload, payload.len() as u16)
 }
 
 fn ack(ty: u16, id: u16) -> Vec<u8> {
@@ -151,7 +163,7 @@ fn receive(fake: &FakeCamera, want: usize) -> (Slot, usize) {
     let worker = {
         let (camera, running, exchange) = (fake.camera, running.clone(), exchange.clone());
         thread::spawn(move || {
-            stream::run(&camera, &running, &exchange, || {
+            stream::run(&camera, &Route::default(), &running, &exchange, || {
                 let _ = tx.send(());
             })
         })
@@ -219,6 +231,31 @@ fn re_registers_until_the_camera_streams() {
 }
 
 #[test]
+fn probe_identifies_the_camera() {
+    let fake = FakeCamera::start(Gravity::default(), 0, Quirks::default());
+    let info = stream::probe(&fake.camera, &Route::default(), Duration::from_secs(3))
+        .expect("the simulated camera answers");
+    assert_eq!(info.product, "BK7231U-XRH-FBPRO");
+    assert_eq!(info.ssid, "SIMCAM-01");
+    assert_eq!((info.battery_percent, info.charging), (80, true));
+}
+
+#[test]
+fn probe_gives_up_on_silence() {
+    // Something listens, but never answers: like a home router at 192.168.1.1.
+    let silent = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    let port = silent.local_addr().unwrap().port();
+    let camera = Camera {
+        ip: Ipv4Addr::LOCALHOST,
+        command_port: port,
+        stream_port: port,
+    };
+    let started = std::time::Instant::now();
+    assert!(stream::probe(&camera, &Route::default(), Duration::from_millis(900)).is_none());
+    assert!(started.elapsed() < Duration::from_secs(2));
+}
+
+#[test]
 fn stops_promptly_without_a_camera() {
     // Nothing listens on these ports: the stream keeps retrying until told to stop.
     let camera = Camera {
@@ -228,7 +265,9 @@ fn stops_promptly_without_a_camera() {
     };
     let running = Arc::new(AtomicBool::new(true));
     let r = running.clone();
-    let worker = thread::spawn(move || stream::run(&camera, &r, &Exchange::default(), || {}));
+    let worker = thread::spawn(move || {
+        stream::run(&camera, &Route::default(), &r, &Exchange::default(), || {})
+    });
     thread::sleep(Duration::from_millis(300));
     running.store(false, Ordering::Relaxed);
     let started = std::time::Instant::now();
