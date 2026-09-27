@@ -5,6 +5,14 @@ All notable changes are documented here. The format follows
 [Semantic Versioning](https://semver.org/). The Android app and the desktop client were
 separate projects up to 0.1; from 0.2 they are one codebase.
 
+## [0.2.1] - 2026-09-27
+
+### Changed
+- Android: JNI code ported to jni 0.22 (closure-based thread attachment with a fresh
+  local reference frame per call, signatures checked at compile time). The APK now
+  carries a single jni version. Verified on a Pixel 4a 5G.
+- Gradle 9.8.0; the minimal `gradlew` launcher stays.
+
 ## [0.2.0] - 2026-09-27
 
 ### Added
