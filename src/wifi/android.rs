@@ -11,17 +11,19 @@
 //!
 //! Java's `NetworkCallback` cannot be subclassed from JNI, so the request is made with a
 //! plain one, which is enough to keep it alive, and the granted network is found by
-//! polling: a WiFi network without internet that answers GetDeviceInfo.
+//! polling: a WiFi network without internet that answers GetDeviceInfo. Each poll runs in
+//! its own JNI frame, so the long-lived thread does not accumulate local references.
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use jni::JNIEnv;
-use jni::objects::{GlobalRef, JObject, JObjectArray, JValue};
+use jni::errors::Result as JniResult;
+use jni::objects::{Global, JObject, JObjectArray};
+use jni::{Env, JValue, jni_sig, jni_str};
 
-use crate::android::{call, java_vm, jni_error, new_object, static_call, system_service};
+use crate::android::{call, system_service, with_env};
 use crate::protocol::DeviceInfo;
 use crate::stream::{self, Camera, Route};
 
@@ -37,7 +39,7 @@ const LOCALLY_ADMINISTERED: &str = "02:00:00:00:00:00";
 
 pub struct Link {
     /// The NetworkCallback that keeps the camera network request alive.
-    request: Mutex<Option<GlobalRef>>,
+    request: Mutex<Option<Global<JObject<'static>>>>,
 }
 
 impl Default for Link {
@@ -62,10 +64,7 @@ impl Link {
             return Ok(Route::default());
         }
 
-        let vm = java_vm()?;
-        let mut env = vm.attach_current_thread().map_err(jni_error)?;
-        let cm = connectivity_manager(&mut env)?;
-        let callback = request_camera_network(&mut env, &cm)?;
+        let callback = with_env("requesting the camera network", request_camera_network)?;
         *self.request.lock().unwrap() = Some(callback);
         log::info!("requested the camera network, waiting for the system picker");
 
@@ -74,7 +73,7 @@ impl Link {
             if !running.load(Ordering::Relaxed) {
                 return Err("cancelled".into());
             }
-            for network in candidate_networks(&mut env, &cm)? {
+            for network in with_env("listing networks", wifi_networks_without_internet)? {
                 let route = Route {
                     network: Some(network),
                 };
@@ -93,20 +92,19 @@ impl Link {
         let Some(callback) = self.request.lock().unwrap().take() else {
             return;
         };
-        let result = java_vm().and_then(|vm| {
-            let mut env = vm.attach_current_thread().map_err(jni_error)?;
-            let cm = connectivity_manager(&mut env)?;
+        let result = with_env("releasing the camera network", |env| {
+            let cm = system_service(env, "connectivity")?;
             call(
-                &mut env,
+                env,
                 &cm,
-                "unregisterNetworkCallback",
-                "(Landroid/net/ConnectivityManager$NetworkCallback;)V",
+                jni_str!("unregisterNetworkCallback"),
+                jni_sig!("(Landroid/net/ConnectivityManager$NetworkCallback;)V"),
                 &[JValue::Object(callback.as_obj())],
             )
             .map(drop)
         });
         if let Err(e) = result {
-            log::warn!("releasing the camera network: {e}");
+            log::warn!("{e}");
         }
     }
 }
@@ -115,153 +113,137 @@ fn found(info: &DeviceInfo, on: &str) {
     log::info!("camera {} on {on}: {info}", info.ssid);
 }
 
-fn connectivity_manager<'local>(env: &mut JNIEnv<'local>) -> Result<JObject<'local>, String> {
-    system_service(env, "connectivity")
-}
-
 /// `requestNetwork` for an open WiFi network with a locally administered BSSID and no
 /// internet capability; returns the callback that keeps the request alive.
-fn request_camera_network(env: &mut JNIEnv, cm: &JObject) -> Result<GlobalRef, String> {
-    let mac_text = env.new_string(LOCALLY_ADMINISTERED).map_err(jni_error)?;
-    let mac = static_call(
-        env,
-        "android/net/MacAddress",
-        "fromString",
-        "(Ljava/lang/String;)Landroid/net/MacAddress;",
-        &[JValue::Object(&mac_text)],
-    )?
-    .l()
-    .map_err(jni_error)?;
+fn request_camera_network(env: &mut Env) -> JniResult<Global<JObject<'static>>> {
+    let cm = system_service(env, "connectivity")?;
+    let mac_text = env.new_string(LOCALLY_ADMINISTERED)?;
+    let mac = env
+        .call_static_method(
+            jni_str!("android/net/MacAddress"),
+            jni_str!("fromString"),
+            jni_sig!("(Ljava/lang/String;)Landroid/net/MacAddress;"),
+            &[JValue::Object(&mac_text)],
+        )?
+        .l()?;
 
     // No passphrase: the cameras are open, and setting one would exclude them.
-    let spec = new_object(
-        env,
-        "android/net/wifi/WifiNetworkSpecifier$Builder",
-        "()V",
+    let spec = env.new_object(
+        jni_str!("android/net/wifi/WifiNetworkSpecifier$Builder"),
+        jni_sig!("()V"),
         &[],
     )?;
     call(
         env,
         &spec,
-        "setBssidPattern",
-        "(Landroid/net/MacAddress;Landroid/net/MacAddress;)Landroid/net/wifi/WifiNetworkSpecifier$Builder;",
+        jni_str!("setBssidPattern"),
+        jni_sig!(
+            "(Landroid/net/MacAddress;Landroid/net/MacAddress;)Landroid/net/wifi/WifiNetworkSpecifier$Builder;"
+        ),
         &[JValue::Object(&mac), JValue::Object(&mac)],
     )?;
     let spec = call(
         env,
         &spec,
-        "build",
-        "()Landroid/net/wifi/WifiNetworkSpecifier;",
+        jni_str!("build"),
+        jni_sig!("()Landroid/net/wifi/WifiNetworkSpecifier;"),
         &[],
     )?
-    .l()
-    .map_err(jni_error)?;
+    .l()?;
 
-    let builder = "Landroid/net/NetworkRequest$Builder;";
-    let request = new_object(env, "android/net/NetworkRequest$Builder", "()V", &[])?;
+    let request = env.new_object(
+        jni_str!("android/net/NetworkRequest$Builder"),
+        jni_sig!("()V"),
+        &[],
+    )?;
     call(
         env,
         &request,
-        "addTransportType",
-        &format!("(I){builder}"),
+        jni_str!("addTransportType"),
+        jni_sig!("(I)Landroid/net/NetworkRequest$Builder;"),
         &[JValue::Int(TRANSPORT_WIFI)],
     )?;
     call(
         env,
         &request,
-        "removeCapability",
-        &format!("(I){builder}"),
+        jni_str!("removeCapability"),
+        jni_sig!("(I)Landroid/net/NetworkRequest$Builder;"),
         &[JValue::Int(NET_CAPABILITY_INTERNET)],
     )?;
     call(
         env,
         &request,
-        "setNetworkSpecifier",
-        &format!("(Landroid/net/NetworkSpecifier;){builder}"),
+        jni_str!("setNetworkSpecifier"),
+        jni_sig!("(Landroid/net/NetworkSpecifier;)Landroid/net/NetworkRequest$Builder;"),
         &[JValue::Object(&spec)],
     )?;
     let request = call(
         env,
         &request,
-        "build",
-        "()Landroid/net/NetworkRequest;",
+        jni_str!("build"),
+        jni_sig!("()Landroid/net/NetworkRequest;"),
         &[],
     )?
-    .l()
-    .map_err(jni_error)?;
+    .l()?;
 
-    let callback = new_object(
-        env,
-        "android/net/ConnectivityManager$NetworkCallback",
-        "()V",
+    let callback = env.new_object(
+        jni_str!("android/net/ConnectivityManager$NetworkCallback"),
+        jni_sig!("()V"),
         &[],
     )?;
     call(
         env,
-        cm,
-        "requestNetwork",
-        "(Landroid/net/NetworkRequest;Landroid/net/ConnectivityManager$NetworkCallback;)V",
+        &cm,
+        jni_str!("requestNetwork"),
+        jni_sig!(
+            "(Landroid/net/NetworkRequest;Landroid/net/ConnectivityManager$NetworkCallback;)V"
+        ),
         &[JValue::Object(&request), JValue::Object(&callback)],
     )?;
-    env.new_global_ref(callback).map_err(jni_error)
+    env.new_global_ref(callback)
 }
 
 /// Handles of the WiFi networks without internet that this app can see: where the
 /// requested camera network shows up once the user has picked it.
-fn candidate_networks(env: &mut JNIEnv, cm: &JObject) -> Result<Vec<u64>, String> {
-    // A fresh local frame per poll, or the local references would pile up on this
-    // long-lived attached thread.
-    env.push_local_frame(64).map_err(jni_error)?;
-    let result = wifi_networks_without_internet(env, cm);
-    unsafe { env.pop_local_frame(&JObject::null()) }.map_err(jni_error)?;
-    result
-}
-
-fn wifi_networks_without_internet(env: &mut JNIEnv, cm: &JObject) -> Result<Vec<u64>, String> {
-    let networks = call(env, cm, "getAllNetworks", "()[Landroid/net/Network;", &[])?
-        .l()
-        .map_err(jni_error)?;
-    let networks = JObjectArray::from(networks);
-    let count = env.get_array_length(&networks).map_err(jni_error)?;
+fn wifi_networks_without_internet(env: &mut Env) -> JniResult<Vec<u64>> {
+    let cm = system_service(env, "connectivity")?;
+    let networks = call(
+        env,
+        &cm,
+        jni_str!("getAllNetworks"),
+        jni_sig!("()[Landroid/net/Network;"),
+        &[],
+    )?
+    .l()?;
+    let networks = env.cast_local::<JObjectArray<JObject>>(networks)?;
     let mut handles = Vec::new();
-    for i in 0..count {
-        let network = env
-            .get_object_array_element(&networks, i)
-            .map_err(jni_error)?;
+    for i in 0..networks.len(env)? {
+        let network = networks.get_element(env, i)?;
         let caps = call(
             env,
-            cm,
-            "getNetworkCapabilities",
-            "(Landroid/net/Network;)Landroid/net/NetworkCapabilities;",
+            &cm,
+            jni_str!("getNetworkCapabilities"),
+            jni_sig!("(Landroid/net/Network;)Landroid/net/NetworkCapabilities;"),
             &[JValue::Object(&network)],
         )?
-        .l()
-        .map_err(jni_error)?;
+        .l()?;
         if caps.is_null() {
             continue;
         }
-        let wifi = call(
-            env,
-            &caps,
-            "hasTransport",
-            "(I)Z",
-            &[JValue::Int(TRANSPORT_WIFI)],
-        )?
-        .z()
-        .map_err(jni_error)?;
-        let internet = call(
-            env,
-            &caps,
-            "hasCapability",
-            "(I)Z",
-            &[JValue::Int(NET_CAPABILITY_INTERNET)],
-        )?
-        .z()
-        .map_err(jni_error)?;
+        let has = |env: &mut Env, method, value| {
+            call(env, &caps, method, jni_sig!("(I)Z"), &[JValue::Int(value)])?.z()
+        };
+        let wifi = has(env, jni_str!("hasTransport"), TRANSPORT_WIFI)?;
+        let internet = has(env, jni_str!("hasCapability"), NET_CAPABILITY_INTERNET)?;
         if wifi && !internet {
-            let handle = call(env, &network, "getNetworkHandle", "()J", &[])?
-                .j()
-                .map_err(jni_error)?;
+            let handle = call(
+                env,
+                &network,
+                jni_str!("getNetworkHandle"),
+                jni_sig!("()J"),
+                &[],
+            )?
+            .j()?;
             handles.push(handle as u64);
         }
     }

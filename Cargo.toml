@@ -44,7 +44,7 @@ windows-sys = { version = "0.61.2", features = [
 ] }
 
 [target.'cfg(target_os = "android")'.dependencies]
-jni = "0.21.1"
+jni = "0.22.4"
 # The version winit's android-activity uses, so its NativeWindow is this one.
 ndk = { version = "0.9.0", features = ["api-level-30", "nativewindow"] }
 ndk-sys = "0.6.0"
