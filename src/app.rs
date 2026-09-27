@@ -59,6 +59,9 @@ pub struct App {
     target: f32,
     last_draw: Option<Instant>,
     gestures: Gestures,
+    /// Held while the camera image is on screen.
+    #[cfg(target_os = "android")]
+    screen_on: Option<crate::android::ScreenOn>,
 }
 
 impl App {
@@ -73,12 +76,18 @@ impl App {
             target: UPRIGHT_OFFSET,
             last_draw: None,
             gestures: Gestures::default(),
+            #[cfg(target_os = "android")]
+            screen_on: None,
         }
     }
 
     /// Closes the window, then stops streaming and leaves the camera's network.
     pub fn shutdown(&mut self) {
         self.gl = None;
+        #[cfg(target_os = "android")]
+        {
+            self.screen_on = None;
+        }
         if let Some(session) = self.session.take() {
             session.stop();
         }
@@ -157,7 +166,7 @@ impl App {
     fn quit(&mut self, event_loop: &ActiveEventLoop) {
         // Android: finishing the activity ends the event loop through its lifecycle.
         #[cfg(target_os = "android")]
-        crate::wifi::finish();
+        crate::android::finish();
         #[cfg(not(target_os = "android"))]
         event_loop.exit();
         let _ = event_loop;
@@ -191,7 +200,10 @@ impl ApplicationHandler<UserEvent> for App {
             match self.create_gl(event_loop) {
                 Ok(gl) => {
                     #[cfg(target_os = "android")]
-                    android_window_setup(event_loop);
+                    {
+                        declare_frame_rate(event_loop);
+                        self.screen_on = crate::android::ScreenOn::acquire();
+                    }
                     gl.window.request_redraw();
                     self.gl = Some(gl);
                 }
@@ -228,7 +240,7 @@ impl ApplicationHandler<UserEvent> for App {
                 // added to the event loop's thread.
                 #[cfg(target_os = "android")]
                 std::thread::spawn(|| {
-                    crate::wifi::toast("Keine Kamera gefunden.\nIst sie eingeschaltet?")
+                    crate::android::toast("Keine Kamera gefunden.\nIst sie eingeschaltet?")
                 });
                 #[cfg(not(target_os = "android"))]
                 event_loop.exit();
@@ -288,18 +300,13 @@ impl ApplicationHandler<UserEvent> for App {
     }
 }
 
-/// Keeps the screen on, and tells the display the content changes at the camera's rate
-/// so it can drop to its lowest refresh rate.
+/// Tells the display the content changes at the camera's rate, so it can drop to its
+/// lowest refresh rate. (Only reads from android-activity; see `android.rs` for why the
+/// screen is kept on through JNI instead of window flags.)
 #[cfg(target_os = "android")]
-fn android_window_setup(event_loop: &ActiveEventLoop) {
+fn declare_frame_rate(event_loop: &ActiveEventLoop) {
     use winit::platform::android::ActiveEventLoopExtAndroid;
-    use winit::platform::android::activity::WindowManagerFlags;
-    let app = event_loop.android_app();
-    app.set_window_flags(
-        WindowManagerFlags::KEEP_SCREEN_ON,
-        WindowManagerFlags::empty(),
-    );
-    if let Some(window) = app.native_window() {
+    if let Some(window) = event_loop.android_app().native_window() {
         let fixed = ndk::native_window::FrameRateCompatibility::FixedSource;
         if let Err(e) = window.set_frame_rate(CAMERA_FPS, fixed) {
             log::warn!("frame rate hint: {e}");

@@ -18,9 +18,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use jni::JNIEnv;
 use jni::objects::{GlobalRef, JObject, JObjectArray, JValue};
-use jni::{JNIEnv, JavaVM};
 
+use crate::android::{call, java_vm, jni_error, new_object, static_call, system_service};
 use crate::protocol::DeviceInfo;
 use crate::stream::{self, Camera, Route};
 
@@ -110,127 +111,12 @@ impl Link {
     }
 }
 
-/// Shows a short system message. Works from any thread: a Toast wants a Looper on the
-/// calling thread, so one is prepared if there is none.
-pub fn toast(text: &str) {
-    let result = java_vm().and_then(|vm| {
-        let mut env = vm.attach_current_thread().map_err(jni_error)?;
-        let looper = static_call(
-            &mut env,
-            "android/os/Looper",
-            "myLooper",
-            "()Landroid/os/Looper;",
-            &[],
-        )?;
-        if looper.l().map_err(jni_error)?.is_null() {
-            static_call(&mut env, "android/os/Looper", "prepare", "()V", &[])?;
-        }
-        let context = activity();
-        let text = env.new_string(text).map_err(jni_error)?;
-        let toast = static_call(
-            &mut env,
-            "android/widget/Toast",
-            "makeText",
-            "(Landroid/content/Context;Ljava/lang/CharSequence;I)Landroid/widget/Toast;",
-            &[
-                JValue::Object(&context),
-                JValue::Object(&text),
-                JValue::Int(1),
-            ],
-        )?
-        .l()
-        .map_err(jni_error)?;
-        call(&mut env, &toast, "show", "()V", &[]).map(drop)
-    });
-    if let Err(e) = result {
-        log::warn!("toast: {e}");
-    }
-}
-
-/// Finishes the activity, as the back button should.
-pub fn finish() {
-    let result = java_vm().and_then(|vm| {
-        let mut env = vm.attach_current_thread().map_err(jni_error)?;
-        call(&mut env, &activity(), "finish", "()V", &[]).map(drop)
-    });
-    if let Err(e) = result {
-        log::warn!("finish: {e}");
-    }
-}
-
 fn found(info: &DeviceInfo, on: &str) {
     log::info!("camera {} on {on}: {info}", info.ssid);
 }
 
-fn java_vm() -> Result<JavaVM, String> {
-    let ctx = ndk_context::android_context();
-    unsafe { JavaVM::from_raw(ctx.vm().cast()) }.map_err(jni_error)
-}
-
-/// The Activity, owned by android-activity for the life of the app.
-fn activity() -> JObject<'static> {
-    unsafe { JObject::from_raw(ndk_context::android_context().context().cast()) }
-}
-
-fn jni_error(e: impl std::fmt::Display) -> String {
-    format!("JNI: {e}")
-}
-
-/// Calls a method, turning a pending Java exception into an error (and clearing it, so
-/// the thread can keep using JNI).
-fn call<'local>(
-    env: &mut JNIEnv<'local>,
-    obj: &JObject,
-    name: &str,
-    sig: &str,
-    args: &[JValue],
-) -> Result<jni::objects::JValueOwned<'local>, String> {
-    let result = env.call_method(obj, name, sig, args);
-    check(env, result, name)
-}
-
-fn static_call<'local>(
-    env: &mut JNIEnv<'local>,
-    class: &str,
-    name: &str,
-    sig: &str,
-    args: &[JValue],
-) -> Result<jni::objects::JValueOwned<'local>, String> {
-    let result = env.call_static_method(class, name, sig, args);
-    check(env, result, name)
-}
-
-fn new_object<'local>(
-    env: &mut JNIEnv<'local>,
-    class: &str,
-    sig: &str,
-    args: &[JValue],
-) -> Result<JObject<'local>, String> {
-    let result = env.new_object(class, sig, args);
-    check(env, result, class)
-}
-
-fn check<T>(env: &mut JNIEnv, result: jni::errors::Result<T>, what: &str) -> Result<T, String> {
-    result.map_err(|e| {
-        if env.exception_check().unwrap_or(false) {
-            let _ = env.exception_describe();
-            let _ = env.exception_clear();
-        }
-        format!("{what}: {e}")
-    })
-}
-
 fn connectivity_manager<'local>(env: &mut JNIEnv<'local>) -> Result<JObject<'local>, String> {
-    let name = env.new_string("connectivity").map_err(jni_error)?;
-    call(
-        env,
-        &activity(),
-        "getSystemService",
-        "(Ljava/lang/String;)Ljava/lang/Object;",
-        &[JValue::Object(&name)],
-    )?
-    .l()
-    .map_err(jni_error)
+    system_service(env, "connectivity")
 }
 
 /// `requestNetwork` for an open WiFi network with a locally administered BSSID and no

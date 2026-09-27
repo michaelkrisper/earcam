@@ -9,6 +9,8 @@
 //! - [`app`] is the window, shared by all platforms; `main.rs` starts it on the desktop,
 //!   `android_main` below on Android.
 
+#[cfg(target_os = "android")]
+pub mod android;
 pub mod app;
 pub mod assembler;
 pub mod discovery;
@@ -30,6 +32,7 @@ fn android_main(android: winit::platform::android::activity::AndroidApp) {
     use winit::platform::android::EventLoopBuilderExtAndroid;
 
     logger::init();
+    log::info!("EarCam {} starting", env!("CARGO_PKG_VERSION"));
     let event_loop = EventLoop::<app::UserEvent>::with_user_event()
         .with_android_app(android)
         .build()

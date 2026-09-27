@@ -9,6 +9,7 @@ fn main() {
     use winit::event_loop::EventLoop;
 
     earcam::logger::init();
+    log::info!("EarCam {} starting", env!("CARGO_PKG_VERSION"));
     // Before anything spawns a thread, so every thread inherits the blocked signals.
     let signals = QuitSignals::block();
     let event_loop = EventLoop::<UserEvent>::with_user_event()

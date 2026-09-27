@@ -12,7 +12,7 @@
 #[cfg(target_os = "android")]
 mod android;
 #[cfg(target_os = "android")]
-pub use android::{Link, finish, toast};
+pub use android::Link;
 
 #[cfg(not(target_os = "android"))]
 mod desktop;

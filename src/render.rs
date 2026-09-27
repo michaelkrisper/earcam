@@ -43,6 +43,11 @@ impl Renderer {
             let vao = gl.create_vertex_array()?;
             gl.bind_vertex_array(Some(vao));
             let version = shader_version(gl.version().is_embedded);
+            log::info!(
+                "OpenGL {}: {}",
+                gl.get_parameter_string(glow::VERSION),
+                gl.get_parameter_string(glow::RENDERER)
+            );
             let deblock = program(&gl, version, VERTEX_SHADER, DEBLOCK_SHADER)?;
             let display = program(&gl, version, VERTEX_SHADER, DISPLAY_SHADER)?;
             let camera_tex = texture(&gl)?;
