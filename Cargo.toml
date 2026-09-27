@@ -1,0 +1,38 @@
+[package]
+name = "earcam-desktop"
+version = "0.1.0"
+edition = "2024"
+description = "Desktop client for LMECHN WiFi ear cameras (otoscopes)"
+license = "MIT"
+repository = "https://github.com/michaelkrisper/earcam-desktop"
+readme = "README.md"
+keywords = ["otoscope", "camera", "wifi", "opengl"]
+categories = ["multimedia::video"]
+publish = false
+
+[dependencies]
+glow = "0.18.0"
+# EGL on Linux (Wayland and X11), WGL on Windows. GLES 3.0 is preferred so the shaders
+# match the Android app; desktop GL 3.3 is the fallback where no GLES context exists.
+glutin = { version = "0.32.3", default-features = false, features = ["egl", "wayland", "x11", "wgl"] }
+glutin-winit = { version = "0.5.0", default-features = false, features = ["egl", "wayland", "x11", "wgl"] }
+socket2 = "0.6.5"
+# No client-side decorations: the window is always fullscreen.
+winit = { version = "0.30.13", default-features = false, features = ["rwh_06", "wayland", "wayland-dlopen", "x11"] }
+zune-jpeg = "0.5.15"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2.189"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_NetworkManagement_Ndis",
+    "Win32_NetworkManagement_WiFi",
+    "Win32_System_Console",
+] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
