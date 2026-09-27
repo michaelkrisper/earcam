@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+# A newer push makes an in-flight run irrelevant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --check
+
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset: earcam-desktop-linux-x86_64.tar.gz
+          - os: windows-latest
+            asset: earcam-desktop-windows-x86_64.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # Only the default branch writes the shared cache; PRs read it.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      # Includes the end-to-end stream test against a simulated camera on localhost.
+      - name: Test
+        run: cargo test --locked
+
+      - name: Build
+        run: cargo build --release --locked
+
+      - name: Package
+        shell: bash
+        run: |
+          mkdir dist
+          if [ "$RUNNER_OS" = Windows ]; then
+            cp target/release/earcam-desktop.exe "dist/${{ matrix.asset }}"
+          else
+            tar czf "dist/${{ matrix.asset }}" -C target/release earcam-desktop
+          fi
+          ls -l dist >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [fmt, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          path: dist
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
