@@ -53,16 +53,16 @@ and `0x14`–`0x16` (sent to 10006) on top of that table, plus `0x07`/`0x08` and
 `0x17`–`0x19` for firmware update and `0x1a` for setting the clock.
 
 What the library does with the rest, read from its code and **not exercised on the N30
-Pro** unless noted:
+Pro** unless noted (the LED and the two getters were tried on 2026-10-20):
 
 | Type | Port | Payload | Purpose |
 |---|---|---|---|
-| `0x0a` | 10005 | 3 bytes: LED number (low nibble) and 0 = get / 1 = set (high nibble); state 0 off, 1 on, 2 blink, 3 breathe, 4 button; brightness 0–100 | LED. The stock app sends `11 01 64` (LED 1 on at 100 %) 500 ms after connecting; EarCam does the same before registering the stream, if capability bit `0x01` is set. |
+| `0x0a` | 10005 | 3 bytes: LED number (low nibble) and 0 = get / 1 = set (high nibble); state 0 off, 1 on, 2 blink, 3 breathe, 4 button; brightness 0–100 | LED. The stock app sends `11 01 64` (LED 1 on at 100 %) 500 ms after connecting; EarCam does the same before registering the stream, if capability bit `0x01` is set. On the N30 Pro the getter (`01 00 00`) answers `01 01 64`: the LED is already on at 100 %. |
 | `0x0b` | 10005 | `uint16` count, then that many 8-bit chunk indices | Retransmission request, only for stream packet format 2 (see [Stream chunks](#stream-chunks)). The N30 Pro sends format 1, which has no retransmission. |
 | `0x0c` | 10005 | `item` (capability bit), type (low nibble, 0 get / 1 set) and action (high nibble), `int32` value | Generic command; the stock app only uses it for the work mode, and only if the camera advertises one. |
 | `0x0f` | 10005 | `uint32` port | Tells the camera where to push file notifications; the stock app only does this for one other product. |
-| `0x10` / `0x11` | 10005 | 12 bytes: `int32` auto exposure, `int32` unknown, `int32` absolute exposure | Get / set exposure, UVC style. Never called by the stock app. |
-| `0x12` / `0x13` | 10005 | 40 bytes, ten `int32`: brightness, contrast, hue, saturation, sharpness, gamma, auto white balance, white balance temperature, backlight compensation, gain | Get / set image parameters, UVC style. Never called by the stock app; whether this firmware honours them is unknown. |
+| `0x10` / `0x11` | 10005 | 12 bytes: `int32` auto exposure, `int32` unknown, `int32` absolute exposure | Get / set exposure, UVC style. Never called by the stock app. The N30 Pro answers the getter with error 2. |
+| `0x12` / `0x13` | 10005 | 40 bytes, ten `int32`: brightness, contrast, hue, saturation, sharpness, gamma, auto white balance, white balance temperature, backlight compensation, gain | Get / set image parameters, UVC style. Never called by the stock app. The N30 Pro answers the getter with error 2. |
 | `0x14` | 10006 | `uint16` port | Registers the client's [announcement](#device-announcements) port. The library re-sends it after 15 s without an announcement. |
 | `0x15` | 10006 | 1 byte | Low-power mode, only sent if bit 2 of the device info flags is set. That bit is clear on the N30 Pro, hence the error 2 it returns. |
 | `0x1b` | 10005 | 1 byte | Record status sync, only if bit 6 of the device info flags is set. |
@@ -206,8 +206,8 @@ lost chunks the client re-requests with type `0x0b`. The library takes the gravi
 only from chunks with flags `& 0x09 == 0x01`, reconnects if the MAC bytes do not match
 the device info, and drops a frame unless it starts with `FF D8` and has `FF D9` in its
 last 16 bytes. Its reassembly drops a frame on any gap or reordering; EarCam's is more
-tolerant. EarCam only logs the flags (`chunk flags 0x..`) until a hardware log shows
-what the N30 Pro sends in byte 5.
+tolerant. The N30 Pro sends flags `0x01` on every chunk (logged on hardware,
+2026-10-20); EarCam applies the same gravity check.
 
 Reassembly: the chunk index is a **global** 8-bit counter that keeps running across
 frames (a frame of 15 chunks might be `112..126`), so a frame's first index is only known

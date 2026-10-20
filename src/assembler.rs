@@ -12,7 +12,7 @@
 //!
 //! Frames and their buffers are recycled; steady-state streaming allocates nothing.
 
-use crate::protocol::{CHUNK_PAYLOAD, Chunk, Gravity};
+use crate::protocol::{CHUNK_PAYLOAD, Chunk, FLAG_GRAVITY, FLAGS_GRAVITY_MASK, Gravity};
 
 pub struct Frame {
     pub index: u8,
@@ -107,7 +107,9 @@ impl Assembler {
             frame.sizes[idx] = src.len() as u16;
             frame.received += 1;
         }
-        frame.gravity = h.gravity;
+        if h.flags & FLAGS_GRAVITY_MASK == FLAG_GRAVITY {
+            frame.gravity = h.gravity;
+        }
         if h.is_last && h.total > 0 {
             frame.last_chunk = Some(h.chunk_index);
             frame.total = h.total as usize;
@@ -213,5 +215,13 @@ mod tests {
         }
         // A new frame reusing index 0 must not complete with the stale chunk.
         assert!(feed(&mut a, &chunk(0, 0, 0, 0, 0, 0, 0, 10, 0)).is_none());
+    }
+    #[test]
+    fn ignores_gravity_from_chunks_without_it() {
+        let mut a = Assembler::new(4);
+        let mut last = chunk(0, 0, 1, 1, 5, 60, 7, 10, 0);
+        last[5] = 0x09; // offset 6 holds temperature/humidity instead
+        let f = a.add(&parse_chunk(&last, 0).unwrap(), &last).unwrap();
+        assert_eq!(f.gravity, Gravity::default());
     }
 }

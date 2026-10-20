@@ -1,5 +1,6 @@
 //! Touch gestures on touchscreens (Android): pinch zooms the whole picture, circle
-//! included, around the fingers; one finger pans; a double tap resets.
+//! included, around the fingers; one finger pans; a double tap toggles the mirror; a
+//! long press resets the zoom.
 //!
 //! Pure state machine over pointer events, so it is tested without a device.
 
@@ -11,6 +12,8 @@ pub const MAX_ZOOM: f32 = 4.0;
 pub const MASK_OVERSCAN: f32 = 1.1;
 
 const DOUBLE_TAP: Duration = Duration::from_millis(300);
+/// A finger held still at least this long and lifted resets the zoom.
+const LONG_PRESS: Duration = Duration::from_millis(500);
 /// How far a finger may move and still count as a tap, in pixels.
 const TAP_SLOP: f32 = 24.0;
 
@@ -79,17 +82,30 @@ pub enum Phase {
 }
 
 /// Tracks the pointers and turns their motion into [`Zoom`] changes.
-#[derive(Default)]
 pub struct Gestures {
     pub zoom: Zoom,
+    /// Show the picture mirrored left to right; on by default.
+    pub mirrored: bool,
     pointers: BTreeMap<u64, (f32, f32)>,
     /// Where a potential tap started, while only one finger is down and it stays put.
     tap_start: Option<(Instant, f32, f32)>,
     last_tap: Option<(Instant, f32, f32)>,
 }
 
+impl Default for Gestures {
+    fn default() -> Self {
+        Gestures {
+            zoom: Zoom::default(),
+            mirrored: true,
+            pointers: BTreeMap::new(),
+            tap_start: None,
+            last_tap: None,
+        }
+    }
+}
+
 impl Gestures {
-    /// Feeds one pointer event; returns true if the zoom changed.
+    /// Feeds one pointer event; returns true if the zoom or the mirror changed.
     pub fn touch(
         &mut self,
         id: u64,
@@ -99,7 +115,7 @@ impl Gestures {
         now: Instant,
         (width, height): (f32, f32),
     ) -> bool {
-        let before = self.zoom;
+        let before = (self.zoom, self.mirrored);
         match phase {
             Phase::Down => {
                 self.pointers.insert(id, (x, y));
@@ -132,14 +148,18 @@ impl Gestures {
             }
             Phase::Up => {
                 self.pointers.remove(&id);
-                if let Some((start, tx, ty)) = self.tap_start.take()
-                    && now - start < DOUBLE_TAP
-                {
+                let Some((start, tx, ty)) = self.tap_start.take() else {
+                    return (self.zoom, self.mirrored) != before;
+                };
+                if now - start >= LONG_PRESS {
+                    self.zoom = Zoom::default();
+                    self.last_tap = None;
+                } else if now - start < DOUBLE_TAP {
                     let double = self.last_tap.is_some_and(|(t, lx, ly)| {
                         now - t < DOUBLE_TAP * 2 && (tx - lx).hypot(ty - ly) < TAP_SLOP * 2.0
                     });
                     if double {
-                        self.zoom = Zoom::default();
+                        self.mirrored = !self.mirrored;
                         self.last_tap = None;
                     } else {
                         self.last_tap = Some((now, tx, ty));
@@ -147,7 +167,7 @@ impl Gestures {
                 }
             }
         }
-        self.zoom != before
+        (self.zoom, self.mirrored) != before
     }
 
     /// Centroid of the pointers and their mean distance from it.
@@ -228,7 +248,32 @@ mod tests {
     }
 
     #[test]
-    fn double_tap_resets() {
+    fn mirrored_by_default() {
+        assert!(Gestures::default().mirrored);
+    }
+
+    #[test]
+    fn double_tap_toggles_mirror() {
+        let mut g = Gestures::default();
+        g.touch(1, Phase::Down, 500.0, 1000.0, at(0), (W, H));
+        g.touch(1, Phase::Up, 500.0, 1000.0, at(80), (W, H));
+        g.touch(1, Phase::Down, 505.0, 1002.0, at(200), (W, H));
+        assert!(g.touch(1, Phase::Up, 505.0, 1002.0, at(260), (W, H)));
+        assert!(!g.mirrored);
+    }
+
+    #[test]
+    fn slow_taps_do_not_mirror() {
+        let mut g = Gestures::default();
+        g.touch(1, Phase::Down, 500.0, 1000.0, at(0), (W, H));
+        g.touch(1, Phase::Up, 500.0, 1000.0, at(80), (W, H));
+        g.touch(1, Phase::Down, 500.0, 1000.0, at(2000), (W, H));
+        g.touch(1, Phase::Up, 500.0, 1000.0, at(2080), (W, H));
+        assert!(g.mirrored);
+    }
+
+    #[test]
+    fn long_press_resets_zoom() {
         let mut g = Gestures {
             zoom: Zoom {
                 scale: 3.0,
@@ -238,14 +283,13 @@ mod tests {
             ..Default::default()
         };
         g.touch(1, Phase::Down, 500.0, 1000.0, at(0), (W, H));
-        g.touch(1, Phase::Up, 500.0, 1000.0, at(80), (W, H));
-        g.touch(1, Phase::Down, 505.0, 1002.0, at(200), (W, H));
-        assert!(g.touch(1, Phase::Up, 505.0, 1002.0, at(260), (W, H)));
+        assert!(g.touch(1, Phase::Up, 505.0, 1000.0, at(600), (W, H)));
         assert_eq!(g.zoom, Zoom::default());
+        assert!(g.mirrored);
     }
 
     #[test]
-    fn slow_taps_do_not_reset() {
+    fn a_moving_press_does_not_reset() {
         let mut g = Gestures {
             zoom: Zoom {
                 scale: 3.0,
@@ -254,9 +298,8 @@ mod tests {
             ..Default::default()
         };
         g.touch(1, Phase::Down, 500.0, 1000.0, at(0), (W, H));
-        g.touch(1, Phase::Up, 500.0, 1000.0, at(80), (W, H));
-        g.touch(1, Phase::Down, 500.0, 1000.0, at(2000), (W, H));
-        g.touch(1, Phase::Up, 500.0, 1000.0, at(2080), (W, H));
+        g.touch(1, Phase::Move, 600.0, 1000.0, at(100), (W, H));
+        g.touch(1, Phase::Up, 600.0, 1000.0, at(700), (W, H));
         assert_eq!(g.zoom.scale, 3.0);
     }
 

@@ -163,8 +163,13 @@ impl App {
         self.angle = smooth(self.angle, self.target, factor_for(dt_ms), self.deadband);
 
         let size = gl.window.inner_size();
-        gl.renderer
-            .draw(size.width, size.height, self.angle, self.gestures.zoom);
+        gl.renderer.draw(
+            size.width,
+            size.height,
+            self.angle,
+            self.gestures.zoom,
+            self.gestures.mirrored,
+        );
         let _ = gl.surface.swap_buffers(&gl.context);
     }
 
@@ -270,6 +275,12 @@ impl ApplicationHandler<UserEvent> for App {
                     self.quit(event_loop)
                 }
                 Key::Character(c) if c.eq_ignore_ascii_case("q") => self.quit(event_loop),
+                Key::Character(c) if c.eq_ignore_ascii_case("m") => {
+                    self.gestures.mirrored = !self.gestures.mirrored;
+                    if let Some(gl) = &self.gl {
+                        gl.window.request_redraw();
+                    }
+                }
                 _ => {}
             },
             WindowEvent::Touch(touch) => {

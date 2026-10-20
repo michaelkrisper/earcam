@@ -31,12 +31,12 @@ pub const TYPE_SET_PIC_PORT: u16 = 0x0016;
 /// LED state, 3-byte payload: LED number (low nibble) and 0 = get / 1 = set (high nibble),
 /// state (0 off, 1 on), brightness 0-100. The reply has the same layout.
 pub const TYPE_LED: u16 = 0x000a;
-/// Read-only queries the stock app never makes. EarCam logs the answers once per session
-/// to find out whether this firmware has them (docs/protocol.md, "Command messages").
-pub const TYPE_GET_EXPOSURE: u16 = 0x0010;
-pub const TYPE_GET_PARAMETERS: u16 = 0x0012;
 /// [`DeviceInfo::capabilities`] bit for a controllable LED.
 pub const CAP_LIGHT: u8 = 0x01;
+/// [`ChunkHeader::flags`]: the gravity vector is valid only if bit 0 is set and bit 3
+/// (temperature/humidity at its offset instead) is clear, as libWifiCamera.so checks.
+pub const FLAG_GRAVITY: u8 = 0x01;
+pub const FLAGS_GRAVITY_MASK: u8 = 0x09;
 
 /// A 12-byte command header followed by `payload`.
 pub fn command(ty: u16, id: u16, payload: &[u8], declared_len: u16) -> Vec<u8> {
@@ -60,11 +60,6 @@ pub fn set_pic_port(port: u16, id: u16) -> Vec<u8> {
 /// Turns LED 1 on at full brightness, as the stock app does right after connecting.
 pub fn led_on(id: u16) -> Vec<u8> {
     command(TYPE_LED, id, &[0x11, 1, 100], 3)
-}
-
-/// Asks for LED 1's state and brightness.
-pub fn led_query(id: u16) -> Vec<u8> {
-    command(TYPE_LED, id, &[0x01, 0, 0], 3)
 }
 
 /// The header of a command or of the camera's reply to one.
@@ -193,8 +188,8 @@ pub struct ChunkHeader {
     pub is_last: bool,
     /// Number of chunks in the frame; only set on the last one.
     pub total: u8,
-    /// Bit 0: gravity present; bit 3: offset 6 holds temperature/humidity instead. Read
-    /// from libWifiCamera.so, not yet observed, so EarCam only logs it.
+    /// Bit 0: gravity present; bit 3: offset 6 holds temperature/humidity instead. Always
+    /// `0x01` on the LMECHN unit.
     pub flags: u8,
     pub gravity: Gravity,
     /// Informational: the JPEG carries its own size.

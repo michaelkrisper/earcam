@@ -8,10 +8,11 @@ separate projects up to 0.1; from 0.2 they are one codebase.
 ## [Unreleased]
 
 ### Added
-- The LED is switched on at full brightness after connecting, as the stock app does.
-- Once per session, the log shows the camera's answers to read-only LED, exposure and
-  image parameter queries, and every change of the chunk flags byte, to find out what
-  the firmware supports.
+- The picture is mirrored left to right by default. Double-tap toggles the mirror on
+  Android, **m** on the desktop. A long press now resets the zoom.
+- The LED is switched on at full brightness after connecting, as the stock app does
+  (the LMECHN unit has it on already).
+- The gravity vector is taken only from chunks that flag it, as the stock library does.
 
 ### Changed
 - The image no longer jumps when the probe points almost straight up or down: beyond

@@ -20,7 +20,7 @@ use zune_jpeg::errors::DecodeErrors;
 use zune_jpeg::zune_core::bytestream::ZCursor;
 
 use crate::assembler::Assembler;
-use crate::protocol::{self, COMMAND_HEADER_SIZE, DeviceInfo, Gravity, parse_chunk, parse_command};
+use crate::protocol::{self, DeviceInfo, Gravity, parse_chunk, parse_command};
 
 /// Where the camera listens. Always the defaults on real hardware; tests point it at a
 /// simulated camera on localhost.
@@ -173,7 +173,7 @@ pub fn run(
 
     let mut last_request: Option<Instant> = None;
     let mut last_frame: Option<Instant> = None;
-    let mut settings_queried = false;
+    let mut led_done = false;
     let mut last_flags: Option<u8> = None;
     let mut stats = Stats::new();
 
@@ -191,9 +191,11 @@ pub fn run(
             {
                 Ok(n) => {
                     log_reply(&reply[..n], camera.command_port);
-                    if !settings_queried && let Some(info) = DeviceInfo::parse(&reply[..n]) {
-                        settings_queried = true;
-                        query_settings(&control, command_addr, info.capabilities, &mut next_id);
+                    if !led_done && let Some(info) = DeviceInfo::parse(&reply[..n]) {
+                        led_done = true;
+                        if info.capabilities & protocol::CAP_LIGHT != 0 {
+                            switch_led_on(&control, command_addr, next_id());
+                        }
                     }
                 }
                 Err(e) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {
@@ -279,45 +281,17 @@ pub fn decode(jpeg: &[u8], into: &mut Slot) -> Result<(), DecodeErrors> {
     Ok(())
 }
 
-/// Logs what the camera reports for its LED, exposure and image parameters, then turns
-/// the LED on like the stock app. Runs once per session before the stream starts, with a
-/// short timeout, so a query this firmware ignores costs little.
-fn query_settings(
-    control: &UdpSocket,
-    addr: SocketAddrV4,
-    capabilities: u8,
-    next_id: &mut impl FnMut() -> u16,
-) {
+/// Turns the LED on like the stock app, once per session. The LMECHN unit already has it
+/// on at full brightness; others may not.
+fn switch_led_on(control: &UdpSocket, addr: SocketAddrV4, id: u16) {
     let _ = control.set_read_timeout(Some(Duration::from_millis(300)));
-    let ask = |name: &str, msg: Vec<u8>| {
-        let mut reply = [0u8; 256];
-        match control
-            .send_to(&msg, addr)
-            .and_then(|_| control.recv(&mut reply))
-        {
-            Ok(n) => match parse_command(&reply[..n]) {
-                Some(h) => log::info!(
-                    "{name}: cmd 0x{:02x} err={} {:02x?}",
-                    h.ty,
-                    h.error,
-                    &reply[COMMAND_HEADER_SIZE.min(n)..n]
-                ),
-                None => log::info!("{name}: unexpected {n}-byte reply"),
-            },
-            Err(_) => log::info!("{name}: no reply"),
-        }
-    };
-    ask("led", protocol::led_query(next_id()));
-    ask(
-        "exposure",
-        protocol::command(protocol::TYPE_GET_EXPOSURE, next_id(), &[], 0),
-    );
-    ask(
-        "image parameters",
-        protocol::command(protocol::TYPE_GET_PARAMETERS, next_id(), &[], 0),
-    );
-    if capabilities & protocol::CAP_LIGHT != 0 {
-        ask("led on", protocol::led_on(next_id()));
+    let mut reply = [0u8; 64];
+    match control
+        .send_to(&protocol::led_on(id), addr)
+        .and_then(|_| control.recv(&mut reply))
+    {
+        Ok(n) => log_reply(&reply[..n], addr.port()),
+        Err(_) => log::info!("led: no reply"),
     }
     let _ = control.set_read_timeout(Some(Duration::from_millis(1500)));
 }

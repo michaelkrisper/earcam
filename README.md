@@ -67,11 +67,11 @@ the binaries of its commit as artifacts.
 Switch the camera on, then start EarCam.
 
 - **Android:** confirm the camera in the system's network picker. Pinch to zoom, drag
-  to pan, double-tap to reset, and use Back to quit. If the phone is already on the
-  camera's WiFi, EarCam uses it directly.
+  to pan, long-press to reset, double-tap to toggle the mirror (on by default), and use
+  Back to quit. If the phone is already on the camera's WiFi, EarCam uses it directly.
 - **Linux / Windows:** EarCam searches for up to a minute, joins the camera, and runs
-  fullscreen. Press **q** or **Esc** to quit. On quit it reconnects the network that
-  was active before (or `Katze` if there was none). Closing the window and Ctrl+C work
+  fullscreen. Press **m** to toggle the mirror (on by default), **q** or **Esc** to quit.
+  On quit it reconnects the network that was active before (or `Katze` if there was none). Closing the window and Ctrl+C work
   too.
 
 Most laptops have a single WiFi card, so **a laptop is offline while the camera is

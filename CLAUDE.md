@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-EarCam: a minimal client for i4season-firmware WiFi ear cameras (otoscopes), sold as LMECHN, Suear, inskam, Bebird, LEIPUT and others. **One Rust library for Android, Linux and Windows.** It has one window: the live image rotated upright inside a circle on black. There are no settings and no UI beyond that (plus touch zoom on Android). Keep it that way.
+EarCam: a minimal client for i4season-firmware WiFi ear cameras (otoscopes), sold as LMECHN, Suear, inskam, Bebird, LEIPUT and others. **One Rust library for Android, Linux and Windows.** It has one window: the live image rotated upright inside a circle on black. There are no settings and no UI beyond that (plus touch zoom on Android and a mirror, on by default: double tap toggles it on Android, `m` on the desktop; a long press resets the zoom). Keep it that way.
 
 The protocol was reverse-engineered from the stock app (`com.i4season.bkCamera_lmechn` v1.0.012, decompiled under `~/tools/re/out/lmechn`) and its `libWifiCamera.so`. `docs/protocol.md` is the authoritative write-up. Read it before touching `protocol.rs`, `assembler.rs` or `orientation.rs`; it records which message types work on this firmware and which are dead ends.
 
@@ -38,7 +38,7 @@ There is no mingw linker on the dev laptop, so Windows binaries come only from C
 - Ports: commands UDP 10005, stream UDP 10006, the camera pushes a 29-byte type `0x09` announcement to client port 10007 once a second (ignored; useful as a sign of life). Camera IP is fixed at `192.168.1.1`. GetDeviceInfo replies 12 + 128 bytes.
 - The gravity vector at chunk offset 6 is a `uint32` of **three 10-bit sign-magnitude fields** (z = bits 0-9, y = 10-19, x = 20-29). Reading it as three `int16` yields garbage.
 - Rotation is verified on hardware (2026-09-27): roll `atan2(z, y)`, image drawn at `-90deg - roll`. Beyond 85deg tilt (probe pointing up/down) the roll is held, and the deadband widens near vertical, as in the stock library (not yet hardware-tested).
-- Resolution get/set (`0x0d`/`0x0e`) exists, but the N30 Pro lacks capability bit `0x40`: 480x480 is fixed. No message sets JPEG quality or frame rate.
+- Resolution get/set (`0x0d`/`0x0e`) exists, but the N30 Pro lacks capability bit `0x40`: 480x480 is fixed. No message sets JPEG quality or frame rate, and the N30 Pro answers the exposure and image parameter getters (`0x10`/`0x12`) with error 2: there are no image knobs at all.
 
 ## Hardware and testing constraints
 

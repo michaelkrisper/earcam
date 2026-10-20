@@ -34,6 +34,7 @@ pub struct Renderer {
     u_rotation: Option<NativeUniformLocation>,
     u_zoom: Option<NativeUniformLocation>,
     u_pan: Option<NativeUniformLocation>,
+    u_mirror: Option<NativeUniformLocation>,
 }
 
 impl Renderer {
@@ -61,6 +62,7 @@ impl Renderer {
                 u_rotation: gl.get_uniform_location(display, "uRotation"),
                 u_zoom: gl.get_uniform_location(display, "uZoom"),
                 u_pan: gl.get_uniform_location(display, "uPan"),
+                u_mirror: gl.get_uniform_location(display, "uMirror"),
                 gl,
                 camera_tex,
                 deblocked_tex,
@@ -137,8 +139,9 @@ impl Renderer {
         }
     }
 
-    /// Draws the deblocked frame turned clockwise by `angle` degrees.
-    pub fn draw(&self, width: u32, height: u32, angle: f32, zoom: Zoom) {
+    /// Draws the deblocked frame turned clockwise by `angle` degrees, then mirrored left to
+    /// right if `mirrored`.
+    pub fn draw(&self, width: u32, height: u32, angle: f32, zoom: Zoom, mirrored: bool) {
         let gl = &self.gl;
         let (w, h) = (width as f32, height as f32);
         let rad = angle.to_radians();
@@ -155,6 +158,7 @@ impl Renderer {
             gl.uniform_2_f32(self.u_rotation.as_ref(), rad.cos(), rad.sin());
             gl.uniform_1_f32(self.u_zoom.as_ref(), zoom.scale);
             gl.uniform_2_f32(self.u_pan.as_ref(), zoom.pan_x, zoom.pan_y);
+            gl.uniform_1_f32(self.u_mirror.as_ref(), if mirrored { -1.0 } else { 1.0 });
             gl.draw_arrays(glow::TRIANGLES, 0, 3);
         }
     }
@@ -316,11 +320,13 @@ uniform float uRadius;
 uniform vec2 uRotation; // cos, sin of the clockwise image rotation
 uniform float uZoom;
 uniform vec2 uPan;      // circle centre offset from uCenter, pixels, y down
+uniform float uMirror;  // -1 mirrors the circle's content left to right, 1 leaves it
 out vec4 color;
 void main() {
     // Offset from the circle centre, y pointing down like the image rows.
     vec2 p = (vec2(gl_FragCoord.x - uCenter.x, uCenter.y - gl_FragCoord.y) - uPan) / uZoom;
     float inside = clamp((uRadius - length(p)) * uZoom + 0.5, 0.0, 1.0);
+    p.x *= uMirror;
     // Undo the image rotation to find where this pixel samples it.
     vec2 q = vec2(uRotation.x * p.x + uRotation.y * p.y, uRotation.x * p.y - uRotation.y * p.x);
     vec2 uv = q / (2.0 * uRadius) + 0.5;
