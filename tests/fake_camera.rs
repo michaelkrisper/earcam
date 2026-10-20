@@ -9,7 +9,7 @@ use std::thread;
 use std::time::Duration;
 
 use earcam::protocol::{
-    self, ChunkHeader, Gravity, TYPE_GET_DEVICE_INFO, TYPE_SET_PIC_PORT, parse_command,
+    self, ChunkHeader, Gravity, TYPE_GET_DEVICE_INFO, TYPE_LED, TYPE_SET_PIC_PORT, parse_command,
 };
 use earcam::stream::{self, Camera, Exchange, Route, Slot};
 
@@ -31,6 +31,7 @@ struct Quirks {
 struct FakeCamera {
     camera: Camera,
     registrations: Arc<AtomicUsize>,
+    led_on: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
 }
 
@@ -52,16 +53,31 @@ impl FakeCamera {
             stream_port: stream.local_addr().unwrap().port(),
         };
         let registrations = Arc::new(AtomicUsize::new(0));
+        let led_on = Arc::new(AtomicBool::new(false));
         let stop = Arc::new(AtomicBool::new(false));
 
-        let s = stop.clone();
+        let (s, led) = (stop.clone(), led_on.clone());
         thread::spawn(move || {
             let mut buf = [0u8; 256];
             while !s.load(Ordering::Relaxed) {
                 if let Ok((n, from)) = command.recv_from(&mut buf) {
                     let h = parse_command(&buf[..n]).expect("command header");
-                    assert_eq!(h.ty, TYPE_GET_DEVICE_INFO);
-                    command.send_to(&device_info(h.id), from).unwrap();
+                    let reply = match h.ty {
+                        TYPE_GET_DEVICE_INFO => device_info(h.id),
+                        TYPE_LED => {
+                            if buf[12] == 0x11 {
+                                led.store(true, Ordering::SeqCst);
+                            }
+                            protocol::command(TYPE_LED, h.id, &buf[12..15], 3)
+                        }
+                        // Anything else is unsupported, as the image parameters may be.
+                        _ => {
+                            let mut nak = ack(h.ty, h.id);
+                            nak[9] = 2;
+                            nak
+                        }
+                    };
+                    command.send_to(&reply, from).unwrap();
                 }
             }
         });
@@ -90,6 +106,7 @@ impl FakeCamera {
         FakeCamera {
             camera,
             registrations,
+            led_on,
             stop,
         }
     }
@@ -110,6 +127,7 @@ fn device_info(id: u16) -> Vec<u8> {
     payload[0x41..0x47].copy_from_slice(b"HKV48B");
     payload[0x51..0x5a].copy_from_slice(b"SIMCAM-01");
     payload[0x77..0x79].copy_from_slice(&(80u16 << 9 | 0x100).to_le_bytes());
+    payload[0x79] = protocol::CAP_LIGHT | 0x02;
     protocol::command(TYPE_GET_DEVICE_INFO, id, &payload, payload.len() as u16)
 }
 
@@ -133,6 +151,7 @@ fn send_frames(socket: &UdpSocket, to: SocketAddr, gravity: Gravity, frames: usi
                     frame_index: frame_index as u8,
                     is_last: last,
                     total: if last { pieces.len() as u8 } else { 0 },
+                    flags: 1,
                     gravity,
                     width: 480,
                     height: 480,
@@ -194,6 +213,7 @@ fn streams_and_decodes_frames() {
     assert_eq!((slot.width, slot.height), (480, 480));
     assert_eq!(slot.rgb.len(), 480 * 480 * 3);
     assert_eq!(slot.gravity, gravity);
+    assert!(fake.led_on.load(Ordering::SeqCst), "LED switched on");
     // Top-left marker in the fixture is near-white, the ellipse in the middle dark red.
     let px = |x: usize, y: usize| &slot.rgb[(y * 480 + x) * 3..][..3];
     assert!(

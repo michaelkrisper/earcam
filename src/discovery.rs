@@ -5,7 +5,7 @@
 //! wire:
 //!
 //! - an **open** access point (no password),
-//! - a BSSID with the **locally administered** bit set (the Beken BK7231U firmware makes
+//! - a BSSID with the **locally administered** bit set (the camera firmware makes
 //!   up its MAC rather than using one from a vendor range; `82:77:8a:...` on the LMECHN
 //!   unit), or else a network name from [`KNOWN_PREFIXES`],
 //! - and, once joined, an answer to GetDeviceInfo at 192.168.1.1, which is the actual

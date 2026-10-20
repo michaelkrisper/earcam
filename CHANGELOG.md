@@ -5,6 +5,20 @@ All notable changes are documented here. The format follows
 [Semantic Versioning](https://semver.org/). The Android app and the desktop client were
 separate projects up to 0.1; from 0.2 they are one codebase.
 
+## [Unreleased]
+
+### Added
+- The LED is switched on at full brightness after connecting, as the stock app does.
+- Once per session, the log shows the camera's answers to read-only LED, exposure and
+  image parameter queries, and every change of the chunk flags byte, to find out what
+  the firmware supports.
+
+### Changed
+- The image no longer jumps when the probe points almost straight up or down: beyond
+  85° tilt the roll is held, and the deadband widens near the vertical.
+- docs/protocol.md: chunk header, announcement layout, further message types and the
+  chip question, from an analysis of `libWifiCamera.so`.
+
 ## [0.2.1] - 2026-09-27
 
 ### Changed

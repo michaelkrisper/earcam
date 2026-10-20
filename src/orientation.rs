@@ -4,13 +4,30 @@
 //! Roll is `atan2(z, y)` and the image is turned by its negative to cancel it; the sensor
 //! image itself comes out a quarter turn off, hence [`UPRIGHT_OFFSET`].
 
+use crate::protocol::Gravity;
+
 pub const UPRIGHT_OFFSET: f32 = -90.0;
 
-pub fn angle_degrees(y: i32, z: i32) -> f32 {
-    if y == 0 && z == 0 {
-        return 0.0;
+/// Beyond this tilt the probe points almost straight up or down: gravity runs along it,
+/// y and z shrink to sensor noise and their angle is meaningless. The stock library
+/// freezes the angle past the same 85 degrees.
+const MAX_TILT: f32 = 85.0;
+
+/// The roll, or None if it cannot be told (see [`MAX_TILT`]); keep the previous one then.
+pub fn angle_degrees(g: Gravity) -> Option<f32> {
+    let r = (g.y as f32).hypot(g.z as f32);
+    if r == 0.0 || (g.x.abs() as f32).atan2(r).to_degrees() > MAX_TILT {
+        return None;
     }
-    (z as f32).atan2(y as f32).to_degrees()
+    Some((g.z as f32).atan2(g.y as f32).to_degrees())
+}
+
+/// A step of one unit in y or z turns the roll by up to 1 rad / r, so the noise floor
+/// outgrows [`DEADBAND`] as the probe tilts towards the vertical. The stock library
+/// widens its hold threshold with the tilt along roughly the same curve.
+pub fn deadband(g: Gravity) -> f32 {
+    let r = (g.y as f32).hypot(g.z as f32);
+    DEADBAND.max(1f32.to_degrees() / r)
 }
 
 /// Low-pass filter over the shortest angular path, so the image eases into place instead
@@ -47,9 +64,26 @@ mod tests {
         assert!(smooth(350.0, 10.0, 0.5, DEADBAND) > 350.0);
     }
 
+    fn g(x: i32, y: i32, z: i32) -> Gravity {
+        Gravity { x, y, z }
+    }
+
     #[test]
-    fn angle_is_zero_when_sensor_is_flat() {
-        assert_eq!(angle_degrees(0, 0), 0.0);
-        assert!((angle_degrees(0, 100) - 90.0).abs() < 1e-3);
+    fn angle_follows_roll() {
+        assert!((angle_degrees(g(0, 0, 60)).unwrap() - 90.0).abs() < 1e-3);
+        assert!((angle_degrees(g(30, -60, 0)).unwrap() - 180.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn angle_is_unknown_when_probe_points_up_or_down() {
+        assert_eq!(angle_degrees(g(0, 0, 0)), None);
+        assert_eq!(angle_degrees(g(60, 3, 3)), None);
+        assert!(angle_degrees(g(60, 6, 0)).is_some());
+    }
+
+    #[test]
+    fn deadband_widens_near_vertical() {
+        assert_eq!(deadband(g(0, 60, 0)), DEADBAND);
+        assert!(deadband(g(59, 6, 0)) > 9.0);
     }
 }

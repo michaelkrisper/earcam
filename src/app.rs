@@ -26,7 +26,7 @@ use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::{Window, WindowId};
 
 use crate::gestures::{Gestures, Phase};
-use crate::orientation::{DEADBAND, UPRIGHT_OFFSET, angle_degrees, factor_for, smooth};
+use crate::orientation::{DEADBAND, UPRIGHT_OFFSET, angle_degrees, deadband, factor_for, smooth};
 use crate::render::Renderer;
 use crate::session::{self, Session};
 use crate::stream::{Exchange, Slot};
@@ -57,6 +57,7 @@ pub struct App {
     front: Slot,
     angle: f32,
     target: f32,
+    deadband: f32,
     last_draw: Option<Instant>,
     gestures: Gestures,
     /// Held while the camera image is on screen.
@@ -74,6 +75,7 @@ impl App {
             front: Slot::default(),
             angle: UPRIGHT_OFFSET,
             target: UPRIGHT_OFFSET,
+            deadband: DEADBAND,
             last_draw: None,
             gestures: Gestures::default(),
             #[cfg(target_os = "android")]
@@ -147,7 +149,10 @@ impl App {
         if self.exchange.take(&mut self.front) {
             gl.renderer.upload(&self.front);
             let g = self.front.gravity;
-            self.target = UPRIGHT_OFFSET - angle_degrees(g.y, g.z);
+            if let Some(roll) = angle_degrees(g) {
+                self.target = UPRIGHT_OFFSET - roll;
+                self.deadband = deadband(g);
+            }
         }
         let now = Instant::now();
         let dt_ms = self
@@ -155,7 +160,7 @@ impl App {
             .map_or(0.0, |t| (now - t).as_secs_f32() * 1e3)
             .min(100.0);
         self.last_draw = Some(now);
-        self.angle = smooth(self.angle, self.target, factor_for(dt_ms), DEADBAND);
+        self.angle = smooth(self.angle, self.target, factor_for(dt_ms), self.deadband);
 
         let size = gl.window.inner_size();
         gl.renderer

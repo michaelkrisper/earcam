@@ -28,6 +28,15 @@ pub const TYPE_OPEN_VIDEO: u16 = 0x0004;
 /// Registers the UDP port the client wants frames on; this is what actually starts the
 /// stream on this firmware. Sent to [`STREAM_PORT`].
 pub const TYPE_SET_PIC_PORT: u16 = 0x0016;
+/// LED state, 3-byte payload: LED number (low nibble) and 0 = get / 1 = set (high nibble),
+/// state (0 off, 1 on), brightness 0-100. The reply has the same layout.
+pub const TYPE_LED: u16 = 0x000a;
+/// Read-only queries the stock app never makes. EarCam logs the answers once per session
+/// to find out whether this firmware has them (docs/protocol.md, "Command messages").
+pub const TYPE_GET_EXPOSURE: u16 = 0x0010;
+pub const TYPE_GET_PARAMETERS: u16 = 0x0012;
+/// [`DeviceInfo::capabilities`] bit for a controllable LED.
+pub const CAP_LIGHT: u8 = 0x01;
 
 /// A 12-byte command header followed by `payload`.
 pub fn command(ty: u16, id: u16, payload: &[u8], declared_len: u16) -> Vec<u8> {
@@ -46,6 +55,16 @@ pub fn command(ty: u16, id: u16, payload: &[u8], declared_len: u16) -> Vec<u8> {
 /// payload length of 0 while still appending the two port bytes; reproduced byte for byte.
 pub fn set_pic_port(port: u16, id: u16) -> Vec<u8> {
     command(TYPE_SET_PIC_PORT, id, &port.to_le_bytes(), 0)
+}
+
+/// Turns LED 1 on at full brightness, as the stock app does right after connecting.
+pub fn led_on(id: u16) -> Vec<u8> {
+    command(TYPE_LED, id, &[0x11, 1, 100], 3)
+}
+
+/// Asks for LED 1's state and brightness.
+pub fn led_query(id: u16) -> Vec<u8> {
+    command(TYPE_LED, id, &[0x01, 0, 0], 3)
 }
 
 /// The header of a command or of the camera's reply to one.
@@ -79,13 +98,15 @@ pub const DEVICE_INFO_SIZE: usize = 128;
 pub struct DeviceInfo {
     /// Firmware vendor tag, e.g. `YPC`.
     pub vendor: String,
-    /// The chip and board, e.g. `BK7231U-XRH-FBPRO` (Beken BK7231U).
+    /// The product string, e.g. `BK7231U-XRH-FBPRO`. It need not name the real chip (see docs/protocol.md).
     pub product: String,
     pub firmware: String,
     pub ssid: String,
     pub mac: [u8; 6],
     pub battery_percent: u8,
     pub charging: bool,
+    /// `CAMCAP_*` bits, e.g. [`CAP_LIGHT`]; `0x03` (light, G-sensor) on the LMECHN unit.
+    pub capabilities: u8,
 }
 
 impl DeviceInfo {
@@ -111,6 +132,7 @@ impl DeviceInfo {
             mac: p[0x71..0x77].try_into().unwrap(),
             battery_percent: (power >> 9) as u8,
             charging: power & 0x100 != 0,
+            capabilities: p[0x79],
         })
     }
 }
@@ -171,6 +193,9 @@ pub struct ChunkHeader {
     pub is_last: bool,
     /// Number of chunks in the frame; only set on the last one.
     pub total: u8,
+    /// Bit 0: gravity present; bit 3: offset 6 holds temperature/humidity instead. Read
+    /// from libWifiCamera.so, not yet observed, so EarCam only logs it.
+    pub flags: u8,
     pub gravity: Gravity,
     /// Informational: the JPEG carries its own size.
     pub width: u16,
@@ -186,6 +211,7 @@ impl ChunkHeader {
         h[2] = self.frame_index;
         h[3] = self.is_last as u8;
         h[4] = self.total;
+        h[5] = self.flags;
         h[6..10].copy_from_slice(&self.gravity.pack().to_le_bytes());
         h[10..12].copy_from_slice(&0x7458u16.to_le_bytes()); // unknown, constant on this unit
         h[12..14].copy_from_slice(&self.width.to_le_bytes());
@@ -213,6 +239,7 @@ pub fn parse_chunk(data: &[u8], offset: usize) -> Option<Chunk> {
             frame_index: h[2],
             is_last: h[3] == 1,
             total: h[4],
+            flags: h[5],
             gravity: Gravity::unpack(u32::from_le_bytes([h[6], h[7], h[8], h[9]])),
             width: u16::from_le_bytes([h[12], h[13]]),
             height: u16::from_le_bytes([h[14], h[15]]),
@@ -374,6 +401,7 @@ pub(crate) mod tests {
             frame_index,
             is_last: last == 1,
             total,
+            flags: 1,
             gravity: Gravity { x, y, z },
             width: 640,
             height: 480,
