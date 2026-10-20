@@ -5,7 +5,7 @@ All notable changes are documented here. The format follows
 [Semantic Versioning](https://semver.org/). The Android app and the desktop client were
 separate projects up to 0.1; from 0.2 they are one codebase.
 
-## [Unreleased]
+## [0.3.0] - 2026-10-20
 
 ### Added
 - The picture is mirrored left to right by default. Double-tap toggles the mirror on

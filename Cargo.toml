@@ -1,6 +1,6 @@
 [package]
 name = "earcam"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2024"
 description = "Viewer for i4season-firmware WiFi ear cameras (otoscopes) on Android, Linux and Windows"
 license = "MIT"
