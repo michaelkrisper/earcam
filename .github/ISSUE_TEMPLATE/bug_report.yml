@@ -1,0 +1,39 @@
+name: Bug report
+description: Something does not work as expected
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: Steps to reproduce, what you expected, and what happened instead
+    validations:
+      required: true
+  - type: input
+    id: camera
+    attributes:
+      label: Camera
+      placeholder: LMECHN N30 Pro
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options: [Android, Linux, Windows]
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: Device and OS version
+      placeholder: Pixel 4a 5G, Android 14 / Fedora 44 / Windows 11
+  - type: input
+    id: version
+    attributes:
+      label: EarCam version
+      placeholder: "0.2.1"
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: Terminal output on the desktop, `adb logcat -s EarCam` on Android
+      render: text

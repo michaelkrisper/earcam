@@ -1,7 +1,5 @@
-//! Wire format of the i4season "bkCamera" WiFi otoscope family (Suear, LMECHN, inskam, ...).
-//!
-//! Reverse-engineered from the stock LMECHN app and its libWifiCamera.so; the full
-//! write-up is docs/protocol.md in github.com/michaelkrisper/earcam.
+//! Wire format of the i4season WiFi otoscope family (LMECHN, Suear, inskam, ...). The full
+//! description is docs/protocol.md in github.com/michaelkrisper/earcam.
 //!
 //! Commands and their replies share a 12-byte little-endian header starting with the magic
 //! `0xffeeffee`. Video arrives as JPEG frames cut into chunks, each with a 16-byte header
@@ -22,8 +20,8 @@ pub const COMMAND_HEADER_SIZE: usize = 12;
 const MAGIC: [u8; 4] = 0xffee_ffee_u32.to_le_bytes();
 
 pub const TYPE_GET_DEVICE_INFO: u16 = 0x0001;
-/// What the older Suear-era clients send to start the stream. This firmware acks it with
-/// no error and then sends nothing; kept for reference and tests.
+/// The classic OpenVideo command. This firmware acks it with no error and then sends
+/// nothing; kept for reference and tests.
 pub const TYPE_OPEN_VIDEO: u16 = 0x0004;
 /// Registers the UDP port the client wants frames on; this is what actually starts the
 /// stream on this firmware. Sent to [`STREAM_PORT`].
@@ -34,7 +32,7 @@ pub const TYPE_LED: u16 = 0x000a;
 /// [`DeviceInfo::capabilities`] bit for a controllable LED.
 pub const CAP_LIGHT: u8 = 0x01;
 /// [`ChunkHeader::flags`]: the gravity vector is valid only if bit 0 is set and bit 3
-/// (temperature/humidity at its offset instead) is clear, as libWifiCamera.so checks.
+/// (temperature/humidity at its offset instead) is clear.
 pub const FLAG_GRAVITY: u8 = 0x01;
 pub const FLAGS_GRAVITY_MASK: u8 = 0x09;
 
@@ -51,13 +49,13 @@ pub fn command(ty: u16, id: u16, payload: &[u8], declared_len: u16) -> Vec<u8> {
     buf
 }
 
-/// Tells the camera which UDP port should receive video. The stock client declares a
-/// payload length of 0 while still appending the two port bytes; reproduced byte for byte.
+/// Tells the camera which UDP port should receive video. The header declares a payload
+/// length of 0 while the two port bytes still follow; the camera expects it that way.
 pub fn set_pic_port(port: u16, id: u16) -> Vec<u8> {
     command(TYPE_SET_PIC_PORT, id, &port.to_le_bytes(), 0)
 }
 
-/// Turns LED 1 on at full brightness, as the stock app does right after connecting.
+/// Turns LED 1 on at full brightness.
 pub fn led_on(id: u16) -> Vec<u8> {
     command(TYPE_LED, id, &[0x11, 1, 100], 3)
 }
@@ -84,7 +82,7 @@ pub fn parse_command(data: &[u8]) -> Option<CommandHeader> {
     })
 }
 
-/// Size of the GetDeviceInfo reply payload; the stock client rejects anything else.
+/// Size of the GetDeviceInfo reply payload.
 pub const DEVICE_INFO_SIZE: usize = 128;
 
 /// The camera's answer to [`TYPE_GET_DEVICE_INFO`]. Getting one at all is what identifies
@@ -100,7 +98,7 @@ pub struct DeviceInfo {
     pub mac: [u8; 6],
     pub battery_percent: u8,
     pub charging: bool,
-    /// `CAMCAP_*` bits, e.g. [`CAP_LIGHT`]; `0x03` (light, G-sensor) on the LMECHN unit.
+    /// Capability bits, e.g. [`CAP_LIGHT`]; `0x03` (light, G-sensor) on the LMECHN unit.
     pub capabilities: u8,
 }
 
@@ -157,7 +155,7 @@ pub struct Gravity {
 
 impl Gravity {
     /// Three 10-bit fields (9-bit magnitude, sign in bit 9), z lowest. Reading them as
-    /// int16, as older write-ups do, gives garbage.
+    /// int16 gives garbage.
     fn unpack(packed: u32) -> Gravity {
         fn field(v: u32) -> i32 {
             let mag = (v & 0x1ff) as i32;
@@ -250,7 +248,7 @@ pub(crate) mod tests {
 
     #[test]
     fn open_video_matches_captured_bytes() {
-        // Captured from the stock client: magic, id=0, type=4, unk=1, err=0, len=0.
+        // Magic, id=0, type=4, always-1 byte, err=0, len=0.
         let expected = [0xee, 0xff, 0xee, 0xff, 0, 0, 4, 0, 1, 0, 0, 0];
         assert_eq!(command(TYPE_OPEN_VIDEO, 0, &[], 0), expected);
     }

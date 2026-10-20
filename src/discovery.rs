@@ -15,9 +15,8 @@
 //! BSSID rule exists: "open, locally administered BSSID" covers every brand in one request.
 
 /// Network name prefixes of known camera brands, matched case-insensitively. Candidates
-/// with these names are tried first. `LMECHN` is verified on hardware; `SUNUO` is the
-/// default SSID in the stock app's code; the others are from earlier reverse-engineering
-/// of Suear-era clients.
+/// with these names are tried first. `LMECHN` is verified on hardware; the others are
+/// names other brands of the same camera family use.
 pub const KNOWN_PREFIXES: &[&str] = &["LMECHN", "SUNUO", "SUEAR", "inskam"];
 
 /// A network seen in a WiFi scan.
@@ -92,7 +91,7 @@ mod tests {
         assert!(has_known_prefix("LMECHN-59F77"));
         assert!(has_known_prefix("Inskam-1234"));
         assert!(has_known_prefix("SUNUO-T1-XXXX"));
-        assert!(!has_known_prefix("Katze"));
+        assert!(!has_known_prefix("HomeNetwork"));
         assert!(!has_known_prefix("LM"));
     }
 
@@ -103,14 +102,14 @@ mod tests {
             &parse_mac("82:77:8a:01:58:74").unwrap()
         ));
         assert!(!is_locally_administered(
-            &parse_mac("e4:e1:30:c8:f9:6e").unwrap()
+            &parse_mac("e4:e1:30:00:00:02").unwrap()
         ));
     }
 
     #[test]
     fn candidates_are_open_and_ordered() {
         let scan = [
-            net("Katze", "e4:e1:30:c8:f9:6e", false),
+            net("HomeNetwork", "e4:e1:30:00:00:02", false),
             net("Cafe Guest", "e4:e1:30:00:00:01", true), // open, vendor BSSID
             net("MysteryCam-01", "12:34:56:78:9a:bc", true), // open, made-up BSSID
             net("LMECHN-59F77", "82:77:8a:01:58:74", true),

@@ -91,7 +91,7 @@ impl FakeCamera {
                 };
                 let h = parse_command(&buf[..n]).expect("command header");
                 assert_eq!(h.ty, TYPE_SET_PIC_PORT);
-                // Header says length 0, yet the port follows: the stock client's quirk.
+                // Header says length 0, yet the port follows.
                 assert_eq!(n, protocol::COMMAND_HEADER_SIZE + 2);
                 let port = u16::from_le_bytes([buf[12], buf[13]]);
                 stream.send_to(&ack(h.ty, h.id), from).unwrap();
@@ -118,8 +118,8 @@ impl Drop for FakeCamera {
     }
 }
 
-/// A GetDeviceInfo reply as a Beken-based unit sends it: 128-byte payload with vendor,
-/// product (chip), firmware and SSID at fixed offsets.
+/// A GetDeviceInfo reply as the LMECHN unit sends it: 128-byte payload with vendor,
+/// product string, firmware and SSID at fixed offsets.
 fn device_info(id: u16) -> Vec<u8> {
     let mut payload = [0u8; protocol::DEVICE_INFO_SIZE];
     payload[0x01..0x04].copy_from_slice(b"YPC");

@@ -12,7 +12,7 @@ use super::linux::Backend;
 #[cfg(windows)]
 use super::windows::Backend;
 
-use super::HOME_FALLBACK;
+use super::HOME_WIFI_ENV;
 use crate::discovery::{self, has_known_prefix};
 use crate::protocol::DeviceInfo;
 use crate::stream::{self, Camera, Route};
@@ -87,13 +87,15 @@ impl Link {
     ///
     /// [`connect`]: Link::connect
     pub fn restore(&self) {
-        let target = self.previous.lock().unwrap().take();
-        let target = target.as_deref().unwrap_or(HOME_FALLBACK);
+        let target = (self.previous.lock().unwrap().take())
+            .or_else(|| std::env::var(HOME_WIFI_ENV).ok().filter(|s| !s.is_empty()));
         let backend = match Backend::open() {
             Ok(b) => b,
             Err(e) => return log::warn!("{e}"),
         };
         backend.leave_camera();
+        let Some(target) = target else { return };
+        let target = target.as_str();
         if backend
             .current()
             .ok()

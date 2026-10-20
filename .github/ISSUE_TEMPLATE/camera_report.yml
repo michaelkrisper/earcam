@@ -1,0 +1,46 @@
+name: Camera report
+description: Tell us whether EarCam works with your camera
+title: "Camera: <brand and model>"
+labels: [camera]
+body:
+  - type: input
+    id: camera
+    attributes:
+      label: Camera
+      description: Brand and model as printed on the box or device
+      placeholder: LMECHN N30 Pro
+    validations:
+      required: true
+  - type: dropdown
+    id: result
+    attributes:
+      label: Does it work?
+      options:
+        - "Yes, fully"
+        - "Partly (describe below)"
+        - "No"
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options: [Android, Linux, Windows]
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: EarCam version
+      placeholder: "0.2.1"
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: At least the `camera ...` line and a few seconds after it (terminal on the desktop, `adb logcat -s EarCam` on Android)
+      render: text
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Anything else, e.g. the WiFi network name, rotation or picture problems

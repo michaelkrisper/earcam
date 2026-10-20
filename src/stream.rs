@@ -179,7 +179,7 @@ pub fn run(
 
     while running.load(Ordering::Relaxed) {
         // (Re-)request the stream if it never started or stalled. The device query in
-        // front mirrors the stock client and doubles as a liveness check.
+        // front doubles as a liveness check.
         if last_frame.is_none_or(|t| t.elapsed() > STALL)
             && last_request.is_none_or(|t| t.elapsed() > RETRY)
         {
@@ -281,8 +281,8 @@ pub fn decode(jpeg: &[u8], into: &mut Slot) -> Result<(), DecodeErrors> {
     Ok(())
 }
 
-/// Turns the LED on like the stock app, once per session. The LMECHN unit already has it
-/// on at full brightness; others may not.
+/// Turns the LED on, once per session. The LMECHN unit already has it on at full
+/// brightness; others may not.
 fn switch_led_on(control: &UdpSocket, addr: SocketAddrV4, id: u16) {
     let _ = control.set_read_timeout(Some(Duration::from_millis(300)));
     let mut reply = [0u8; 64];

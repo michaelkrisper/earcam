@@ -2,7 +2,7 @@
 name = "earcam"
 version = "0.2.1"
 edition = "2024"
-description = "Client for i4season WiFi ear cameras (LMECHN and other brands) on Android, Linux and Windows"
+description = "Viewer for i4season-firmware WiFi ear cameras (otoscopes) on Android, Linux and Windows"
 license = "MIT"
 repository = "https://github.com/michaelkrisper/earcam"
 readme = "README.md"

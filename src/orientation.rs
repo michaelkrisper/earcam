@@ -9,8 +9,7 @@ use crate::protocol::Gravity;
 pub const UPRIGHT_OFFSET: f32 = -90.0;
 
 /// Beyond this tilt the probe points almost straight up or down: gravity runs along it,
-/// y and z shrink to sensor noise and their angle is meaningless. The stock library
-/// freezes the angle past the same 85 degrees.
+/// y and z shrink to sensor noise and their angle is meaningless.
 const MAX_TILT: f32 = 85.0;
 
 /// The roll, or None if it cannot be told (see [`MAX_TILT`]); keep the previous one then.
@@ -23,8 +22,7 @@ pub fn angle_degrees(g: Gravity) -> Option<f32> {
 }
 
 /// A step of one unit in y or z turns the roll by up to 1 rad / r, so the noise floor
-/// outgrows [`DEADBAND`] as the probe tilts towards the vertical. The stock library
-/// widens its hold threshold with the tilt along roughly the same curve.
+/// outgrows [`DEADBAND`] as the probe tilts towards the vertical.
 pub fn deadband(g: Gravity) -> f32 {
     let r = (g.y as f32).hypot(g.z as f32);
     DEADBAND.max(1f32.to_degrees() / r)

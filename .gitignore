@@ -10,3 +10,6 @@ captures/
 *.keystore
 .kotlin/
 /target
+
+# Local notes for coding agents; not part of the published project
+CLAUDE.md

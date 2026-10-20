@@ -10,15 +10,22 @@ separate projects up to 0.1; from 0.2 they are one codebase.
 ### Added
 - The picture is mirrored left to right by default. Double-tap toggles the mirror on
   Android, **m** on the desktop. A long press now resets the zoom.
-- The LED is switched on at full brightness after connecting, as the stock app does
-  (the LMECHN unit has it on already).
-- The gravity vector is taken only from chunks that flag it, as the stock library does.
+- The LED is switched on at full brightness after connecting (the LMECHN unit has it
+  on already).
+- The gravity vector is taken only from chunks that flag it.
+- `EARCAM_HOME_WIFI` names the network the desktop returns to on quit when none was
+  active at start.
 
 ### Changed
 - The image no longer jumps when the probe points almost straight up or down: beyond
   85° tilt the roll is held, and the deadband widens near the vertical.
-- docs/protocol.md: chunk header, announcement layout, further message types and the
-  chip question, from an analysis of `libWifiCamera.so`.
+- docs/protocol.md rewritten: chunk header flags, announcements, LED and the full table
+  of message types.
+- README: features, gestures, privacy and disclaimer; CONTRIBUTING.md and issue
+  templates added.
+
+### Removed
+- The built-in fallback network on the desktop; use `EARCAM_HOME_WIFI` instead.
 
 ## [0.2.1] - 2026-09-27
 
@@ -40,8 +47,7 @@ separate projects up to 0.1; from 0.2 they are one codebase.
 - Windows support: WiFi switching through the native WLAN API with a temporary profile,
   a console Ctrl handler for a clean quit, and a desktop GL 3.3 fallback. Built and
   tested in CI, not yet run against a camera.
-- The desktop restores whichever network was active at start; `Katze` is only the
-  fallback.
+- The desktop restores whichever network was active at start.
 - Verified on hardware: Linux desktop, and the Android app on a Pixel 4a 5G (17 fps,
   camera found through the system picker by its BSSID).
 - End-to-end tests against a simulated camera on localhost, and unit tests for

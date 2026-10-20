@@ -163,7 +163,7 @@ mod tests {
         assert_eq!(camera.ssid, "LMECHN-59F77");
         assert_eq!(camera.bssid, parse_mac("82:77:8a:01:58:74"));
         assert!(camera.open);
-        let home = parse_scan_line(r"Katze:E4\:E1\:30\:C8\:F9\:6E:WPA2").unwrap();
+        let home = parse_scan_line(r"HomeNetwork:E4\:E1\:30\:00\:00\:02:WPA2").unwrap();
         assert!(!home.open);
         assert!(parse_scan_line("garbage").is_none());
     }

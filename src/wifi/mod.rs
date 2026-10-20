@@ -27,8 +27,9 @@ mod windows;
 #[cfg(not(any(target_os = "linux", target_os = "android", windows)))]
 compile_error!("EarCam supports Android, Linux (NetworkManager) and Windows");
 
-/// Returned to on quit (desktop) when no other network was connected at start.
-pub const HOME_FALLBACK: &str = "Katze";
+/// Environment variable naming the network to return to on quit (desktop) when no other
+/// network was connected at start. Unset, EarCam just leaves the camera.
+pub const HOME_WIFI_ENV: &str = "EARCAM_HOME_WIFI";
 
 /// The network an interface is connected to.
 #[derive(Debug, Clone, PartialEq, Eq)]

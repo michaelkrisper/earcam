@@ -1,7 +1,7 @@
 //! One visit to the camera: join its network, stream, and on [`Session::stop`] undo it.
 //!
 //! The desktop runs one session per launch; Android one per time the app is in the
-//! foreground, as the stock app does.
+//! foreground.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
