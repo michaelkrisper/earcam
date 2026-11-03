@@ -212,3 +212,39 @@ impl Backend {
         Err("timed out waiting for the WiFi connection".into())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wide_strings_are_nul_terminated_and_round_trip() {
+        let w = wide("LMECHN-59F77");
+        assert_eq!(w.last(), Some(&0));
+        assert_eq!(from_wide(&w), "LMECHN-59F77");
+        assert_eq!(from_wide(&wide("Café")), "Café");
+    }
+
+    #[test]
+    fn from_wide_stops_at_the_first_nul_or_the_buffer_end() {
+        let mut buf = [0u16; 8];
+        for (dst, src) in buf.iter_mut().zip("abc".encode_utf16()) {
+            *dst = src;
+        }
+        assert_eq!(from_wide(&buf), "abc");
+        let full: Vec<u16> = "abcd".encode_utf16().collect();
+        assert_eq!(from_wide(&full), "abcd");
+    }
+
+    #[test]
+    fn ssid_length_is_clamped_to_the_buffer() {
+        let mut ssid = DOT11_SSID {
+            uSSIDLength: 4,
+            ucSSID: [b'x'; 32],
+        };
+        ssid.ucSSID[..4].copy_from_slice(b"cam1");
+        assert_eq!(ssid_string(&ssid), "cam1");
+        ssid.uSSIDLength = 200;
+        assert_eq!(ssid_string(&ssid).len(), 32);
+    }
+}
