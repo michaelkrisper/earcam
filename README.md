@@ -3,6 +3,7 @@
 [![CI](https://github.com/michaelkrisper/earcam/actions/workflows/ci.yml/badge.svg)](https://github.com/michaelkrisper/earcam/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/michaelkrisper/earcam)](https://github.com/michaelkrisper/earcam/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Rust 2024](https://img.shields.io/badge/rust-stable%2C%202024%20edition-orange.svg)](Cargo.toml)
 ![Platforms](https://img.shields.io/badge/platforms-Android%20%7C%20Linux%20%7C%20Windows-informational)
 
 A small, fast, open-source viewer for **WiFi ear cameras** (otoscopes) running the
@@ -152,6 +153,7 @@ NDK `30.0.16248370`, and `cargo install cargo-ndk`.
 ```
 cargo run --release                          # desktop app
 cargo test                                   # unit tests and end-to-end stream tests
+cargo fmt --check                            # formatting, as CI checks it
 cd android && ./gradlew assembleRelease      # APK in android/app/build/outputs/apk/release/
 ```
 
@@ -170,7 +172,7 @@ cargo ndk -t arm64-v8a clippy --all-targets -- -D warnings                 # And
 
 - **Unit tests** cover the wire format, device info parsing, frame reassembly (reorder,
   duplicates, counter wrap-around, stale frames), orientation, candidate networks,
-  touch gestures and `nmcli` output parsing.
+  touch gestures, `nmcli` output parsing and the Windows WLAN string helpers.
 - **`tests/fake_camera.rs`** simulates a camera on localhost: it answers the device
   query, waits for the port registration and streams a real 480x480 JPEG in
   firmware-sized chunks, with variants that reorder chunks, duplicate them and ignore
