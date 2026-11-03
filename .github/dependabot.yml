@@ -3,15 +3,21 @@ updates:
   - package-ecosystem: cargo
     directory: /
     schedule:
-      interval: monthly
+      interval: weekly
     groups:
-      cargo:
-        patterns: ['*']
+      cargo-minor-patch:
+        update-types: [minor, patch]
   - package-ecosystem: gradle
     directory: /android
     schedule:
-      interval: monthly
+      interval: weekly
+    groups:
+      gradle-minor-patch:
+        update-types: [minor, patch]
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: monthly
+      interval: weekly
+    groups:
+      actions-minor-patch:
+        update-types: [minor, patch]

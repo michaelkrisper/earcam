@@ -60,6 +60,24 @@ mod tests {
     #[test]
     fn smooth_takes_shortest_path() {
         assert!(smooth(350.0, 10.0, 0.5, DEADBAND) > 350.0);
+        assert!((smooth(10.0, 350.0, 0.5, DEADBAND) - 0.0).abs() < 1e-3);
+        assert!((smooth(-170.0, 170.0, 1.0, DEADBAND) + 190.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn smooth_holds_still_inside_deadband() {
+        assert_eq!(smooth(45.0, 47.0, 0.5, DEADBAND), 45.0);
+        assert_eq!(smooth(359.0, 1.0, 0.5, DEADBAND), 359.0);
+        assert!((smooth(45.0, 55.0, 0.5, DEADBAND) - 50.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn factor_is_frame_rate_independent() {
+        assert_eq!(factor_for(0.0), 0.0);
+        assert!((factor_for(59.0) - 0.12).abs() < 1e-6);
+        // Two half steps ease exactly as far as one full step.
+        let half = factor_for(29.5);
+        assert!((1.0 - (1.0 - half) * (1.0 - half) - 0.12).abs() < 1e-6);
     }
 
     fn g(x: i32, y: i32, z: i32) -> Gravity {
