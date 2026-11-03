@@ -216,6 +216,28 @@ mod tests {
         // A new frame reusing index 0 must not complete with the stale chunk.
         assert!(feed(&mut a, &chunk(0, 0, 0, 0, 0, 0, 0, 10, 0)).is_none());
     }
+
+    #[test]
+    fn follows_a_restarted_frame_counter() {
+        let mut a = Assembler::new(4);
+        assert!(feed(&mut a, &chunk(0, 200, 1, 1, 0, 0, 0, 10, 0)).is_some());
+        // The camera restarts at frame 100, which looks like a straggler at first.
+        for i in 0..255u8 {
+            assert!(feed(&mut a, &chunk(i, 100 + i % 2, 0, 0, 0, 0, 0, 10, 0)).is_none());
+        }
+        // After a burst of them the assembler accepts the new counter.
+        assert!(feed(&mut a, &chunk(1, 150, 1, 1, 0, 0, 0, 10, 0)).is_some());
+    }
+
+    #[test]
+    fn recycles_frame_buffers() {
+        let mut a = Assembler::new(4);
+        for f in 0..20u8 {
+            assert_eq!(feed(&mut a, &chunk(f, f, 1, 1, 0, 0, 0, 10, f)), Some(10));
+        }
+        assert!(a.frames.len() + a.spare.len() <= 2);
+    }
+
     #[test]
     fn ignores_gravity_from_chunks_without_it() {
         let mut a = Assembler::new(4);
