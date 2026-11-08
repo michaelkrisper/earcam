@@ -1,44 +1,60 @@
 name: Release
 
-# Push a tag like v0.2.0 (matching the version in Cargo.toml) to build every platform
-# and publish one GitHub release with all binaries.
+# Bundles everything merged since the last release: tags main with the next
+# minor or major version and publishes a GitHub release listing the merged
+# pull requests and closed tickets, then builds every platform from the new tag
+# (ci.yml) and attaches the packages with checksums. Patch versions are tagged
+# automatically by CI on every merge and get no release of their own.
+
 on:
-  push:
-    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version part to increase
+        type: choice
+        options: [minor, major]
+        default: minor
 
 permissions:
-  contents: read
+  actions: write
+  contents: write
+  issues: read
+  pull-requests: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
-  build:
-    uses: ./.github/workflows/ci.yml
-
-  publish:
-    needs: build
+  release:
+    name: Release
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    outputs:
+      version: ${{ steps.release.outputs.version }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: release
+        run: python3 .github/scripts/release.py release "$BUMP"
+        env:
+          BUMP: ${{ inputs.bump }}
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          # Workflows to start on main afterwards, e.g. a deploy that stamps the
+          # version into the app. Empty: none.
+          DISPATCH: ""
 
-      - name: Check the tag matches Cargo.toml
-        run: |
-          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
-          if [ "${GITHUB_REF_NAME#v}" != "$version" ]; then
-            echo "::error::tag $GITHUB_REF_NAME does not match Cargo.toml version $version"
-            exit 1
-          fi
-          echo "VERSION=$version" >> "$GITHUB_ENV"
+  build:
+    needs: release
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.release.outputs.version }}
 
-      - name: Release notes from CHANGELOG.md
-        run: |
-          awk -v v="$VERSION" '
-            $0 ~ "^## \\[" v "\\]" { on = 1; next }
-            on && /^## \[/ { exit }
-            on { print }
-          ' CHANGELOG.md > notes.md
-          test -s notes.md || echo "See CHANGELOG.md." > notes.md
-
+  publish:
+    needs: [release, build]
+    runs-on: ubuntu-latest
+    steps:
       - uses: actions/download-artifact@v8
         with:
           path: dist
@@ -48,8 +64,7 @@ jobs:
         working-directory: dist
         run: sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
 
-      - uses: softprops/action-gh-release@v3
-        with:
-          name: EarCam ${{ env.VERSION }}
-          body_path: notes.md
-          files: dist/*
+      - run: gh release upload "$VERSION" dist/* --repo "$GITHUB_REPOSITORY" --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.release.outputs.version }}
