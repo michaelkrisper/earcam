@@ -1,6 +1,7 @@
 # EarCam
 
 [![CI](https://github.com/michaelkrisper/earcam/actions/workflows/ci.yml/badge.svg)](https://github.com/michaelkrisper/earcam/actions/workflows/ci.yml)
+[![Version](https://img.shields.io/github/v/tag/michaelkrisper/earcam?sort=semver&label=version)](https://github.com/michaelkrisper/earcam/releases)
 [![Release](https://img.shields.io/github/v/release/michaelkrisper/earcam)](https://github.com/michaelkrisper/earcam/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust 2024](https://img.shields.io/badge/rust-stable%2C%202024%20edition-orange.svg)](Cargo.toml)
@@ -184,11 +185,12 @@ Only the WiFi switch, the window and the camera itself need real hardware.
 
 Every push and pull request runs formatting, clippy and tests on Linux and Windows,
 clippy for Android, and builds all three packages ([ci.yml](.github/workflows/ci.yml)).
-To release, set the version in `Cargo.toml`, add a section to
-[CHANGELOG.md](CHANGELOG.md) and push a matching tag (`git tag v0.3.0 && git push origin
-v0.3.0`). [release.yml](.github/workflows/release.yml) builds every platform, checks
-the tag against `Cargo.toml` and publishes the release with checksums and the changelog
-section as release notes.
+Versions are git tags only: CI tags every merge to `main` with the next patch version, and
+the app reports the nearest tag (startup log, Android version). A release is made with
+_Actions → Release → Run workflow_ (`minor` or `major`):
+[release.yml](.github/workflows/release.yml) tags `main`, publishes release notes from the
+merged pull requests and closed tickets, builds every platform from the new tag and
+attaches the packages with checksums. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Troubleshooting
 

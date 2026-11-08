@@ -32,7 +32,7 @@ fn android_main(android: winit::platform::android::activity::AndroidApp) {
     use winit::platform::android::EventLoopBuilderExtAndroid;
 
     logger::init();
-    log::info!("EarCam {} starting", env!("CARGO_PKG_VERSION"));
+    log::info!("EarCam {} starting", env!("EARCAM_VERSION"));
     let event_loop = EventLoop::<app::UserEvent>::with_user_event()
         .with_android_app(android)
         .build()

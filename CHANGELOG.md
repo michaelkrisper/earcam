@@ -5,6 +5,9 @@ All notable changes are documented here. The format follows
 [Semantic Versioning](https://semver.org/). The Android app and the desktop client were
 separate projects up to 0.1; from 0.2 they are one codebase.
 
+This file ends with 0.3.0. Later changes are listed in the
+[GitHub releases](https://github.com/michaelkrisper/earcam/releases).
+
 ## [0.3.0] - 2026-10-20
 
 ### Added
