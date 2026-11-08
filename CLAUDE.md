@@ -22,6 +22,16 @@ cd android && ./gradlew assembleRelease                        # APK; runs cargo
   Android on every push and PR. Windows binaries come from CI.
 - The Gradle configuration cache is on (`android/gradle.properties`): build logic must
   be configuration-cache safe. There is no Kotlin or Java (`android.builtInKotlin=false`).
+- Toolchain:
+  - Android NDK `30.0.16248370`, pinned in `ci.yml` and
+    `android/app/build.gradle.kts`. Gradle sets `ANDROID_NDK_HOME` itself; only
+    `cargo ndk` by hand needs it.
+  - `cargo install cargo-ndk`.
+  - `android/local.properties` (gitignored) needs `sdk.dir=<SDK path>`.
+  - JDK 25 in CI.
+  - Policy: latest stable Rust, Gradle, AGP and JDK; upgrade the build tools rather
+    than downgrade the JDK.
+- CI builds with `--locked`: commit `Cargo.lock` together with `Cargo.toml`.
 
 ## Architecture (`src/`)
 
@@ -38,6 +48,11 @@ cd android && ./gradlew assembleRelease                        # APK; runs cargo
 - `app.rs`: the winit/glutin app shared by all platforms. `render.rs`: GLES 3.0 with a
   desktop GL 3.3 fallback. Two passes: deblocking, then rotation, zoom and circular
   mask.
+- `gestures.rs`: pure state machine for pinch, pan, double-tap mirror and long-press
+  reset. `logger.rs`: stderr, or logcat with tag `EarCam`. `android.rs`: JNI helpers
+  (toast, finish, wake lock).
+- `android/` only packages `libearcam.so` (cdylib built by the `cargoNdk` Gradle task)
+  with the manifest and icon. Gradle derives `versionName`/`versionCode` from the git tag.
 - `session.rs`: connect and stream on a worker thread; `stop()` undoes the connection.
   `signals.rs` turns SIGINT/SIGTERM/SIGHUP or Windows console events into a clean quit,
   so the WiFi is always restored.
@@ -51,6 +66,12 @@ cd android && ./gradlew assembleRelease                        # APK; runs cargo
   `orientation.rs`. It records what works on this firmware and what doesn't.
   - Streaming starts with message type `0x16` to port 10006, not `OpenVideo`.
   - The gravity vector is three 10-bit sign-magnitude fields, not three `int16`.
+- Wire-format changes come with a test in `tests/fake_camera.rs` and an update of
+  `docs/protocol.md`.
+- The camera connection is never saved (Linux in-memory profile `earcam`, Windows
+  temporary profile), so no device joins the camera later on its own. Keep it that way.
+- Only one client can use the camera at a time. Stop the Android app
+  (`adb shell am force-stop com.krisper.earcam`) before testing another client.
 - Render only once per camera frame (about 17 fps). Don't reintroduce display-rate
   rendering; touch gestures are the only exception.
 - Android:
@@ -64,7 +85,8 @@ cd android && ./gradlew assembleRelease                        # APK; runs cargo
     created twice per process.
 - Image pipeline choices were A/B-tested on hardware:
   - Deblocking stays.
-  - Denoise and sharpening were rejected.
+  - Denoise and sharpening were rejected. The JPEGs are about 0.6 bit/pixel, and
+    sharper sampling turns the block grid into a mosaic.
   - No ML super-resolution: invented detail is unacceptable in an otoscope image.
   - The firmware has no image-quality, exposure or frame-rate controls. Don't add any.
 - Android `targetSdk` stays at 36 until Android 17's local-network protection has been
@@ -83,4 +105,5 @@ cd android && ./gradlew assembleRelease                        # APK; runs cargo
   `Cargo.toml` is only a fallback. Never bump it.
 - Minor/major releases: Actions -> Release. `release.yml` then builds all platforms
   via `ci.yml` and uploads the binaries with `SHA256SUMS.txt` to the GitHub release.
+- PR titles become the release notes. `CHANGELOG.md` ends at 0.3.0; don't extend it.
 - Details: CONTRIBUTING.md.
