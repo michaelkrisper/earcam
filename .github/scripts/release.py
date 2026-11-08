@@ -171,11 +171,31 @@ def cmd_tag() -> int:
     if tags[-1] not in version_tags(merged_into=sha):
         summary(f"{sha[:7]} is older than {tags[-1]}; not tagging it.")
         return 0
+    head = default_branch_head()
+    if head and head != sha:
+        # A newer commit landed meanwhile; its run tags (and deploys) both.
+        summary(f"{sha[:7]} is no longer the head of main ({head[:7]}); skipping.")
+        return 0
     new = bump(tags[-1], "patch")
-    create_tag(new, sha)
+    try:
+        create_tag(new, sha)
+    except RuntimeError as error:
+        # GITHUB_TOKEN may not create refs to commits whose workflow files differ
+        # from main's; the next run tags a newer commit.
+        print(f"::warning::Could not tag {sha[:7]} as {new}: {error}")
+        return 0
     output(version=new)
     summary(f"Tagged {sha[:7]} as {new}.")
     return 0
+
+
+def default_branch_head() -> str | None:
+    """SHA at the tip of the remote default branch, None if unknown."""
+    try:
+        listing = run("git", "ls-remote", "origin", "HEAD").split()
+    except RuntimeError:
+        return None
+    return listing[0] if listing else None
 
 
 # --- release notes ---------------------------------------------------------
@@ -475,7 +495,10 @@ def rollup_state(checks: list[dict]) -> str:
 
 
 def merge_if_green(number: int, sha: str, default: str) -> bool:
-    fields = "state,isDraft,headRefOid,baseRefName,isCrossRepository,statusCheckRollup"
+    fields = (
+        "state,isDraft,headRefOid,headRefName,baseRefName,isCrossRepository,"
+        "statusCheckRollup"
+    )
     pr = gh_json("pr", "view", str(number), "--repo", repo(), "--json", fields)
     reason = None
     if pr["state"] != "OPEN":
@@ -523,7 +546,17 @@ def merge_if_green(number: int, sha: str, default: str) -> bool:
         raise
     summary(f"Merged PR #{number}.")
     close_linked_issues(number)
+    delete_branch(pr["headRefName"])
     return True
+
+
+def delete_branch(branch: str) -> None:
+    """Delete the merged branch (delete_branch_on_merge skips GITHUB_TOKEN merges)."""
+    try:
+        run("gh", "api", "-X", "DELETE", f"repos/{repo()}/git/refs/heads/{branch}")
+        print(f"Deleted branch {branch}.")
+    except RuntimeError as error:
+        print(f"Branch {branch} not deleted: {error}")
 
 
 def close_linked_issues(number: int) -> None:
