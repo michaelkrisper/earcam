@@ -70,8 +70,8 @@ mod tests {
 
     #[test]
     fn profile_xml_is_open_and_manual() {
-        let xml = open_profile_xml("LMECHN-59F77");
-        assert!(xml.contains("<name>LMECHN-59F77</name>"));
+        let xml = open_profile_xml("LMECHN-0A1B2");
+        assert!(xml.contains("<name>LMECHN-0A1B2</name>"));
         assert!(xml.contains("<authentication>open</authentication>"));
         assert!(xml.contains("<encryption>none</encryption>"));
         assert!(xml.contains("<connectionMode>manual</connectionMode>"));

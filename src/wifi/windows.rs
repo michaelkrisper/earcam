@@ -219,9 +219,9 @@ mod tests {
 
     #[test]
     fn wide_strings_are_nul_terminated_and_round_trip() {
-        let w = wide("LMECHN-59F77");
+        let w = wide("LMECHN-0A1B2");
         assert_eq!(w.last(), Some(&0));
-        assert_eq!(from_wide(&w), "LMECHN-59F77");
+        assert_eq!(from_wide(&w), "LMECHN-0A1B2");
         assert_eq!(from_wide(&wide("Café")), "Café");
     }
 

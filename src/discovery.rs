@@ -6,7 +6,7 @@
 //!
 //! - an **open** access point (no password),
 //! - a BSSID with the **locally administered** bit set (the camera firmware makes
-//!   up its MAC rather than using one from a vendor range; `82:77:8a:...` on the LMECHN
+//!   up its MAC rather than using one from a vendor range, as on the LMECHN
 //!   unit), or else a network name from [`KNOWN_PREFIXES`],
 //! - and, once joined, an answer to GetDeviceInfo at 192.168.1.1, which is the actual
 //!   proof. Candidates that do not answer are left again.
@@ -64,7 +64,7 @@ pub fn candidates(networks: &[Network]) -> Vec<&Network> {
     known
 }
 
-/// Parses `82:77:8a:01:58:74` (or with dashes).
+/// Parses `82:0a:0b:0c:0d:01` (or with dashes).
 pub fn parse_mac(s: &str) -> Option<[u8; 6]> {
     let mut mac = [0u8; 6];
     let mut parts = s.split([':', '-']);
@@ -88,7 +88,7 @@ mod tests {
 
     #[test]
     fn known_prefixes_match_case_insensitively() {
-        assert!(has_known_prefix("LMECHN-59F77"));
+        assert!(has_known_prefix("LMECHN-0A1B2"));
         assert!(has_known_prefix("Inskam-1234"));
         assert!(has_known_prefix("SUNUO-T1-XXXX"));
         assert!(!has_known_prefix("HomeNetwork"));
@@ -97,9 +97,9 @@ mod tests {
 
     #[test]
     fn locally_administered_bit() {
-        // The LMECHN unit's BSSID, and the home router's vendor-assigned one.
+        // A locally administered BSSID like the LMECHN unit's, and a vendor-assigned one.
         assert!(is_locally_administered(
-            &parse_mac("82:77:8a:01:58:74").unwrap()
+            &parse_mac("82:0a:0b:0c:0d:01").unwrap()
         ));
         assert!(!is_locally_administered(
             &parse_mac("e4:e1:30:00:00:02").unwrap()
@@ -112,13 +112,13 @@ mod tests {
             net("HomeNetwork", "e4:e1:30:00:00:02", false),
             net("Cafe Guest", "e4:e1:30:00:00:01", true), // open, vendor BSSID
             net("MysteryCam-01", "12:34:56:78:9a:bc", true), // open, made-up BSSID
-            net("LMECHN-59F77", "82:77:8a:01:58:74", true),
-            net("LMECHN-59F77", "82:77:8a:01:58:75", true), // second BSS, same SSID
+            net("LMECHN-0A1B2", "82:0a:0b:0c:0d:01", true),
+            net("LMECHN-0A1B2", "82:0a:0b:0c:0d:02", true), // second BSS, same SSID
             net("inskam-locked", "02:00:00:00:00:01", false), // camera-like but secured
             net("", "02:00:00:00:00:02", true),             // hidden
         ];
         let names: Vec<&str> = candidates(&scan).iter().map(|n| n.ssid.as_str()).collect();
-        assert_eq!(names, ["LMECHN-59F77", "MysteryCam-01"]);
+        assert_eq!(names, ["LMECHN-0A1B2", "MysteryCam-01"]);
     }
 
     #[test]
@@ -134,11 +134,11 @@ mod tests {
     #[test]
     fn parses_macs() {
         assert_eq!(
-            parse_mac("82-77-8A-01-58-74"),
-            Some([0x82, 0x77, 0x8a, 0x01, 0x58, 0x74])
+            parse_mac("82-0A-0B-0C-0D-01"),
+            Some([0x82, 0x0a, 0x0b, 0x0c, 0x0d, 0x01])
         );
-        assert_eq!(parse_mac("82:77:8a:01:58"), None);
-        assert_eq!(parse_mac("82:77:8a:01:58:74:00"), None);
-        assert_eq!(parse_mac("zz:77:8a:01:58:74"), None);
+        assert_eq!(parse_mac("82:0a:0b:0c:0d"), None);
+        assert_eq!(parse_mac("82:0a:0b:0c:0d:01:00"), None);
+        assert_eq!(parse_mac("zz:0a:0b:0c:0d:01"), None);
     }
 }

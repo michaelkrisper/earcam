@@ -338,7 +338,7 @@ pub(crate) mod tests {
         }
     }
 
-    /// The LMECHN-59F77's reply, rebuilt from the fields logged in docs/protocol.md.
+    /// An LMECHN unit's reply, rebuilt from the fields logged in docs/protocol.md.
     pub(crate) fn lmechn_device_info() -> Vec<u8> {
         let mut reply = command(TYPE_GET_DEVICE_INFO, 1, &[0; DEVICE_INFO_SIZE], 128);
         let p = &mut reply[COMMAND_HEADER_SIZE..];
@@ -346,8 +346,8 @@ pub(crate) mod tests {
         p[0x01..0x0f].copy_from_slice(b"YPC\0ota ok\0sys");
         p[0x21..0x32].copy_from_slice(b"BK7231U-XRH-FBPRO");
         p[0x41..0x47].copy_from_slice(b"HKV48B");
-        p[0x51..0x5d].copy_from_slice(b"LMECHN-59F77");
-        p[0x71..0x77].copy_from_slice(&[0x82, 0x77, 0x8a, 0x01, 0x58, 0x74]);
+        p[0x51..0x5d].copy_from_slice(b"LMECHN-0A1B2");
+        p[0x71..0x77].copy_from_slice(&[0x82, 0x0a, 0x0b, 0x0c, 0x0d, 0x01]);
         p[0x77..0x79].copy_from_slice(&(97u16 << 9).to_le_bytes());
         reply
     }
@@ -358,8 +358,8 @@ pub(crate) mod tests {
         assert_eq!(info.vendor, "YPC");
         assert_eq!(info.product, "BK7231U-XRH-FBPRO");
         assert_eq!(info.firmware, "HKV48B");
-        assert_eq!(info.ssid, "LMECHN-59F77");
-        assert_eq!(info.mac, [0x82, 0x77, 0x8a, 0x01, 0x58, 0x74]);
+        assert_eq!(info.ssid, "LMECHN-0A1B2");
+        assert_eq!(info.mac, [0x82, 0x0a, 0x0b, 0x0c, 0x0d, 0x01]);
         assert_eq!((info.battery_percent, info.charging), (97, false));
         assert_eq!(
             info.to_string(),
