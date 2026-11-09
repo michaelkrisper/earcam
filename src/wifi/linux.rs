@@ -159,9 +159,9 @@ mod tests {
 
     #[test]
     fn parses_scan_lines() {
-        let camera = parse_scan_line(r"LMECHN-59F77:82\:77\:8A\:01\:58\:74:").unwrap();
-        assert_eq!(camera.ssid, "LMECHN-59F77");
-        assert_eq!(camera.bssid, parse_mac("82:77:8a:01:58:74"));
+        let camera = parse_scan_line(r"LMECHN-0A1B2:82\:0A\:0B\:0C\:0D\:01:").unwrap();
+        assert_eq!(camera.ssid, "LMECHN-0A1B2");
+        assert_eq!(camera.bssid, parse_mac("82:0a:0b:0c:0d:01"));
         assert!(camera.open);
         let home = parse_scan_line(r"HomeNetwork:E4\:E1\:30\:00\:00\:02:WPA2").unwrap();
         assert!(!home.open);
@@ -171,6 +171,6 @@ mod tests {
     #[test]
     fn unescape_keeps_colons_in_ssid() {
         assert_eq!(unescape(r"Cafe\: Guest"), "Cafe: Guest");
-        assert_eq!(unescape("LMECHN-59F77"), "LMECHN-59F77");
+        assert_eq!(unescape("LMECHN-0A1B2"), "LMECHN-0A1B2");
     }
 }

@@ -80,7 +80,7 @@ Status messages and a once-a-second summary go to the terminal (desktop) or to l
 (`adb logcat -s EarCam`):
 
 ```
-camera LMECHN-59F77: BK7231U-XRH-FBPRO (YPC), firmware HKV48B, battery 97%
+camera LMECHN-0A1B2: BK7231U-XRH-FBPRO (YPC), firmware HKV48B, battery 97%
 17.2 fps, decode 3.36 ms, 480x480, 17588 bytes, x=-62 y=3 z=-27
 ```
 

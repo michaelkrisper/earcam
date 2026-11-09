@@ -20,7 +20,7 @@ connects to the camera.
 | Announcement port | UDP 10007, on the *client* |
 | Client address | DHCP, first lease `192.168.1.10` |
 
-The access point's BSSID is *locally administered* (e.g. `82:77:8a:01:58:74`), which
+The access point's BSSID is *locally administered* (e.g. `82:0a:0b:0c:0d:01`), which
 EarCam uses to recognise cameras whose network name it does not know.
 
 ## Command messages
@@ -72,8 +72,8 @@ payload is exactly 128 bytes:
 | 0x01 | 32 | vendor tag, NUL-terminated | `YPC` |
 | 0x21 | 32 | product string | `BK7231U-XRH-FBPRO` |
 | 0x41 | 16 | firmware version | `HKV48B` |
-| 0x51 | 32 | SSID | `LMECHN-59F77` |
-| 0x71 | 6 | MAC | `82:77:8a:01:58:74` |
+| 0x51 | 32 | SSID | `LMECHN-0A1B2` |
+| 0x71 | 6 | MAC | `82:0a:0b:0c:0d:01` |
 | 0x77 | 2 | power: battery % = `>> 9`, bit 8 = charging | 97 %, not charging |
 | 0x79 | 1 | capability bits | `0x03` |
 | 0x7a | 1 | work mode 1 | |
